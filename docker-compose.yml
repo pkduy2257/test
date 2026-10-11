@@ -8,7 +8,7 @@ services:
       # Mật khẩu chỉ dùng cho máy dev. Phải khớp với ConnectionStrings trong appsettings.Development.json
       MSSQL_SA_PASSWORD: "LegacyVault_Dev123!"
     ports:
-      - "1433:1433"
+      - "14330:1433"
     volumes:
       - legacyvault-sql-data:/var/opt/mssql
 

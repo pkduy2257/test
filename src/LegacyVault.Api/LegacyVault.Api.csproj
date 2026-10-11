@@ -9,6 +9,9 @@
     <ProjectReference Include="..\LegacyVault.Infrastructure\LegacyVault.Infrastructure.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" />
+    <PackageReference Include="Microsoft.OpenApi" />
     <!-- Lệnh "dotnet ef" cần package Design ở startup project -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <PrivateAssets>all</PrivateAssets>
