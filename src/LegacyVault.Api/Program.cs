@@ -9,12 +9,23 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddApiServices(builder.Configuration);
+builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
 // ===== 2. Pipeline middleware: THỨ TỰ RẤT QUAN TRỌNG, request đi qua từ trên xuống =====
 app.UseExceptionHandler();   // bọc ngoài cùng để bắt lỗi của mọi middleware phía sau
 app.UseStatusCodePages();    // 401/403/404 rỗng → tự thành ProblemDetails JSON
+
+// Tài liệu và giao diện thử API chỉ bật trong môi trường Development.
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+    app.UseSwaggerUI(options =>
+    {
+        options.SwaggerEndpoint("/openapi/v1.json", "LegacyVault API v1");
+    });
+}
 
 if (!app.Environment.IsDevelopment())
 {
