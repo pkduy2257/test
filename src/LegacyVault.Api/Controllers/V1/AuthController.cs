@@ -1,4 +1,5 @@
 using LegacyVault.Api.Common;
+using LegacyVault.Application.Exceptions;
 using LegacyVault.Application.Features.Identity;
 using LegacyVault.Infrastructure.Security;
 using Microsoft.AspNetCore.Authorization;
@@ -11,22 +12,21 @@ namespace LegacyVault.Api.Controllers.V1;
 /// Đăng nhập / làm mới phiên / xem phiên / đăng xuất.
 /// URL khớp với FE: src/features/auth/api/authService.ts và src/app/providers/AuthBootstrap.tsx
 /// </summary>
+[ApiController]
+[Produces("application/json")]
 [Route("api/v1/auth")]
-public sealed class AuthController(IAuthService authService, AuthCookieWriter cookies) : ApiControllerBase
+public sealed class AuthController(IAuthService authService, AuthCookieWriter cookies) : ControllerBase
 {
     /// <summary>POST /api/v1/auth/login</summary>
     [HttpPost("login")]
     [AllowAnonymous]
     public async Task<IActionResult> Login(LoginRequest request, CancellationToken ct)
     {
+        // Sai mật khẩu, bị khóa... → service throw exception, GlobalExceptionHandler trả JSON lỗi.
         var result = await authService.LoginAsync(request, ct);
-        if (result.IsFailure)
-        {
-            return Fail(result.Error!);
-        }
 
-        cookies.Append(Response, result.Value);
-        return OkData(result.Value.Session);
+        cookies.Append(Response, result);
+        return Ok(new ApiResponse<AuthSessionDto>(result.Session));
     }
 
     /// <summary>
@@ -39,15 +39,19 @@ public sealed class AuthController(IAuthService authService, AuthCookieWriter co
     {
         Request.Cookies.TryGetValue(AuthCookieNames.RefreshToken, out var refreshToken);
 
-        var result = await authService.RefreshAsync(refreshToken, ct);
-        if (result.IsFailure)
+        AuthResult result;
+        try
+        {
+            result = await authService.RefreshAsync(refreshToken, ct);
+        }
+        catch (SessionExpiredException)
         {
             cookies.Clear(Response); // phiên hỏng → xóa luôn cookie cũ
-            return Fail(result.Error!);
+            throw;                   // ném tiếp cho GlobalExceptionHandler trả JSON 401
         }
 
-        cookies.Append(Response, result.Value);
-        return OkData(result.Value.Session);
+        cookies.Append(Response, result);
+        return Ok(new ApiResponse<AuthSessionDto>(result.Session));
     }
 
     /// <summary>GET /api/v1/auth/session — FE gọi khi tải trang để biết ai đang đăng nhập.</summary>
@@ -55,8 +59,8 @@ public sealed class AuthController(IAuthService authService, AuthCookieWriter co
     [Authorize] // không có access token hợp lệ → middleware trả 401, không vào tới đây
     public async Task<IActionResult> Session(CancellationToken ct)
     {
-        var result = await authService.GetCurrentUserAsync(ct);
-        return result.IsSuccess ? OkData(new CurrentSessionDto(result.Value)) : Fail(result.Error!);
+        var user = await authService.GetCurrentUserAsync(ct);
+        return Ok(new ApiResponse<CurrentSessionDto>(new CurrentSessionDto(user)));
     }
 
     /// <summary>

@@ -1,5 +1,5 @@
 using LegacyVault.Application.Common.Interfaces;
-using LegacyVault.Domain.Common;
+using LegacyVault.Application.Exceptions;
 using LegacyVault.Domain.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -7,10 +7,10 @@ namespace LegacyVault.Application.Features.Identity;
 
 public interface IAuthService
 {
-    Task<Result<AuthResult>> LoginAsync(LoginRequest request, CancellationToken ct);
-    Task<Result<AuthResult>> RefreshAsync(string? refreshToken, CancellationToken ct);
+    Task<AuthResult> LoginAsync(LoginRequest request, CancellationToken ct);
+    Task<AuthResult> RefreshAsync(string? refreshToken, CancellationToken ct);
     Task LogoutAsync(string? refreshToken, bool revokeAllDevices, CancellationToken ct);
-    Task<Result<UserDto>> GetCurrentUserAsync(CancellationToken ct);
+    Task<UserDto> GetCurrentUserAsync(CancellationToken ct);
 }
 
 /// <summary>
@@ -32,7 +32,7 @@ public sealed class AuthService(
     // Hash của một mật khẩu ngẫu nhiên, dùng để "giả vờ" kiểm tra khi email không tồn tại (xem LoginAsync).
     private static string? _dummyHash;
 
-    public async Task<Result<AuthResult>> LoginAsync(LoginRequest request, CancellationToken ct)
+    public async Task<AuthResult> LoginAsync(LoginRequest request, CancellationToken ct)
     {
         var now = timeProvider.GetUtcNow();
         var email = User.NormalizeEmail(request.Email);
@@ -46,28 +46,31 @@ public sealed class AuthService(
             // Nếu bỏ dòng này, kẻ tấn công đo thời gian phản hồi là biết email nào đã đăng ký.
             _dummyHash ??= passwordHasher.Hash(Guid.NewGuid().ToString());
             passwordHasher.Verify(request.Password, _dummyHash);
-            return AuthErrors.InvalidCredentials();
+            throw new InvalidCredentialsException();
         }
 
         // 2. Kiểm tra quy tắc nghiệp vụ — mỗi quy tắc nằm trong entity, service chỉ hỏi.
         if (user.IsLockedOut(now))
         {
-            return AuthErrors.AccountLocked(user.LockoutRemainingSeconds(now));
+            throw new AccountLockedException(user.LockoutRemainingSeconds(now));
         }
 
         if (!passwordHasher.Verify(request.Password, user.PasswordHash))
         {
             var attemptsRemaining = user.RegisterFailedLogin(now);
             await db.SaveChangesAsync(ct); // lưu số lần sai
-            return attemptsRemaining == 0
-                ? AuthErrors.AccountLocked(user.LockoutRemainingSeconds(now))
-                : AuthErrors.InvalidCredentials(attemptsRemaining);
+            if (attemptsRemaining == 0)
+            {
+                throw new AccountLockedException(user.LockoutRemainingSeconds(now));
+            }
+
+            throw new InvalidCredentialsException(attemptsRemaining);
         }
 
         // Kiểm tra trạng thái SAU khi mật khẩu đúng, để người lạ không dò được trạng thái tài khoản.
         if (user.Status != UserStatus.Active)
         {
-            return AuthErrors.AccountNotActive;
+            throw new AccountNotActiveException();
         }
 
         // 3. Gọi method của entity để đổi trạng thái.
@@ -81,11 +84,11 @@ public sealed class AuthService(
         return result;
     }
 
-    public async Task<Result<AuthResult>> RefreshAsync(string? refreshToken, CancellationToken ct)
+    public async Task<AuthResult> RefreshAsync(string? refreshToken, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(refreshToken))
         {
-            return AuthErrors.SessionExpired;
+            throw new SessionExpiredException();
         }
 
         var now = timeProvider.GetUtcNow();
@@ -98,7 +101,7 @@ public sealed class AuthService(
 
         if (stored is null)
         {
-            return AuthErrors.SessionExpired;
+            throw new SessionExpiredException();
         }
 
         if (stored.IsRevoked)
@@ -107,7 +110,7 @@ public sealed class AuthService(
             // Thu hồi cả family để cả kẻ gian lẫn chủ thật đều phải đăng nhập lại.
             await RevokeFamilyAsync(stored.FamilyId, now, ct);
             await db.SaveChangesAsync(ct);
-            return AuthErrors.SessionExpired;
+            throw new SessionExpiredException();
         }
 
         var user = stored.User;
@@ -115,7 +118,7 @@ public sealed class AuthService(
         {
             stored.Revoke(now);
             await db.SaveChangesAsync(ct);
-            return AuthErrors.SessionExpired;
+            throw new SessionExpiredException();
         }
 
         // Xoay vòng: cấp token mới cùng family, thu hồi token cũ và ghi lại token thay thế.
@@ -159,18 +162,18 @@ public sealed class AuthService(
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task<Result<UserDto>> GetCurrentUserAsync(CancellationToken ct)
+    public async Task<UserDto> GetCurrentUserAsync(CancellationToken ct)
     {
         if (currentUser.UserId is not { } userId)
         {
-            return AuthErrors.SessionExpired;
+            throw new SessionExpiredException();
         }
 
         // AsNoTracking: chỉ đọc, không sửa → EF không cần theo dõi thay đổi, nhanh hơn.
         var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(u => u.Id == userId, ct);
         if (user is null || user.Status != UserStatus.Active)
         {
-            return AuthErrors.SessionExpired;
+            throw new SessionExpiredException();
         }
 
         return UserDto.From(user);

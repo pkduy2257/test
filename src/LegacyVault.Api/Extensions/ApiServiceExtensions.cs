@@ -13,7 +13,8 @@ public static class ApiServiceExtensions
 
     public static IServiceCollection AddApiServices(this IServiceCollection services, IConfiguration configuration)
     {
-        services.AddControllers()
+        // ApiExceptionFilter: đổi lỗi nghiệp vụ (ApiException) thành JSON lỗi cho mọi controller.
+        services.AddControllers(options => options.Filters.Add<ApiExceptionFilter>())
             .ConfigureApiBehaviorOptions(options =>
             {
                 // Khi DTO sai (thiếu email...), [ApiController] tự trả 400.
