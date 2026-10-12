@@ -1,4 +1,5 @@
 using LegacyVault.Application.Common.Interfaces;
+using LegacyVault.Application.Features.Identity;
 using LegacyVault.Domain.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,11 +35,25 @@ public static class DbInitializer
         var now = time.GetUtcNow();
         var hash = hasher.Hash(DemoPassword);
         db.Users.AddRange(
-            User.Create("owner@legacyvault.local", "Nguyễn Văn Chủ", hash, UserRole.Owner, UserStatus.Active, now),
-            User.Create("admin@legacyvault.local", "Quản Trị Viên", hash, UserRole.Admin, UserStatus.Active, now),
-            User.Create("inactive@legacyvault.local", "Tài Khoản Khóa", hash, UserRole.Owner, UserStatus.Inactive, now));
+            CreateDemoUser("owner@legacyvault.local", "Nguyễn Văn Chủ", hash, UserRole.Owner, UserStatus.Active, now),
+            CreateDemoUser("admin@legacyvault.local", "Quản Trị Viên", hash, UserRole.Admin, UserStatus.Active, now),
+            CreateDemoUser("inactive@legacyvault.local", "Tài Khoản Khóa", hash, UserRole.Owner, UserStatus.Inactive, now));
         await db.SaveChangesAsync();
 
         logger.LogInformation("Đã tạo tài khoản demo, mật khẩu chung: {Password}", DemoPassword);
+    }
+
+    private static User CreateDemoUser(
+        string email, string fullName, string passwordHash, UserRole role, UserStatus status, DateTimeOffset now)
+    {
+        return new User
+        {
+            Email = AuthService.NormalizeEmail(email),
+            FullName = fullName.Trim(),
+            PasswordHash = passwordHash,
+            Role = role,
+            Status = status,
+            CreatedAt = now,
+        };
     }
 }

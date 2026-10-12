@@ -14,55 +14,90 @@ public interface IAuthService
 }
 
 /// <summary>
-/// Use case đăng nhập / làm mới phiên / đăng xuất.
+/// Nghiệp vụ đăng nhập / làm mới phiên / đăng xuất (giống một @Service bên Spring Boot).
 /// </summary>
 /// <remarks>
-/// Đây là "primary constructor" (C# 12): các tham số trong ngoặc sau tên class được
-/// DI container truyền vào và dùng được trong toàn bộ class.
-/// Mọi thứ service cần đều là INTERFACE → khi viết unit test có thể thay bằng bản giả.
+/// Mọi thứ service cần đều là INTERFACE, được DI container truyền vào constructor
+/// → khi viết unit test có thể thay bằng bản giả.
+/// Lỗi nghiệp vụ được báo bằng cách throw ApiException (xem thư mục Exceptions).
 /// TimeProvider (có sẵn từ .NET 8) thay cho DateTime.UtcNow để test được "15 phút sau".
 /// </remarks>
-public sealed class AuthService(
-    IUserRepository userRepository,
-    IRefreshTokenRepository refreshTokenRepository,
-    IPasswordHasher passwordHasher,
-    ITokenService tokenService,
-    ICurrentUser currentUser,
-    TimeProvider timeProvider) : IAuthService
+public sealed class AuthService : IAuthService
 {
+    /// <summary>Sai mật khẩu đủ số lần này thì khóa tài khoản.</summary>
+    public const int MaxFailedLoginAttempts = 5;
+
+    /// <summary>Thời gian khóa tài khoản.</summary>
+    public static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
+
     // Hash của một mật khẩu ngẫu nhiên, dùng để "giả vờ" kiểm tra khi email không tồn tại (xem LoginAsync).
     private static string? _dummyHash;
 
+    private readonly IUserRepository _userRepository;
+    private readonly IRefreshTokenRepository _refreshTokenRepository;
+    private readonly IPasswordHasher _passwordHasher;
+    private readonly ITokenService _tokenService;
+    private readonly ICurrentUser _currentUser;
+    private readonly TimeProvider _timeProvider;
+
+    public AuthService(
+        IUserRepository userRepository,
+        IRefreshTokenRepository refreshTokenRepository,
+        IPasswordHasher passwordHasher,
+        ITokenService tokenService,
+        ICurrentUser currentUser,
+        TimeProvider timeProvider)
+    {
+        _userRepository = userRepository;
+        _refreshTokenRepository = refreshTokenRepository;
+        _passwordHasher = passwordHasher;
+        _tokenService = tokenService;
+        _currentUser = currentUser;
+        _timeProvider = timeProvider;
+    }
+
+    /// <summary>
+    /// Chuẩn hóa email để so sánh: bỏ khoảng trắng, chữ thường.
+    /// "  An@Gmail.com " và "an@gmail.com" phải là cùng một tài khoản.
+    /// </summary>
+    public static string NormalizeEmail(string email)
+    {
+        return email.Trim().ToLowerInvariant();
+    }
+
     public async Task<AuthResult> LoginAsync(LoginRequest request, CancellationToken ct)
     {
-        var now = timeProvider.GetUtcNow();
-        var email = User.NormalizeEmail(request.Email);
+        var now = _timeProvider.GetUtcNow();
+        var email = NormalizeEmail(request.Email);
 
         // 1. Tải dữ liệu.
-        var user = await userRepository.FindByEmailAsync(email, ct);
+        var user = await _userRepository.FindByEmailAsync(email, ct);
 
-        if (user is null)
+        if (user == null)
         {
             // Vẫn chạy Argon2 cho tốn đúng bấy nhiêu thời gian như khi email có thật.
             // Nếu bỏ dòng này, kẻ tấn công đo thời gian phản hồi là biết email nào đã đăng ký.
-            _dummyHash ??= passwordHasher.Hash(Guid.NewGuid().ToString());
-            passwordHasher.Verify(request.Password, _dummyHash);
+            if (_dummyHash == null)
+            {
+                _dummyHash = _passwordHasher.Hash(Guid.NewGuid().ToString());
+            }
+            _passwordHasher.Verify(request.Password, _dummyHash);
             throw new InvalidCredentialsException();
         }
 
-        // 2. Kiểm tra quy tắc nghiệp vụ — mỗi quy tắc nằm trong entity, service chỉ hỏi.
-        if (user.IsLockedOut(now))
+        // 2. Kiểm tra quy tắc nghiệp vụ.
+        if (IsLockedOut(user, now))
         {
-            throw new AccountLockedException(user.LockoutRemainingSeconds(now));
+            throw new AccountLockedException(GetLockoutRemainingSeconds(user, now));
         }
 
-        if (!passwordHasher.Verify(request.Password, user.PasswordHash))
+        if (!_passwordHasher.Verify(request.Password, user.PasswordHash))
         {
-            var attemptsRemaining = user.RegisterFailedLogin(now);
-            await userRepository.SaveChangesAsync(ct); // lưu số lần sai
+            var attemptsRemaining = RegisterFailedLogin(user, now);
+            await _userRepository.SaveChangesAsync(ct); // lưu số lần sai
             if (attemptsRemaining == 0)
             {
-                throw new AccountLockedException(user.LockoutRemainingSeconds(now));
+                throw new AccountLockedException(GetLockoutRemainingSeconds(user, now));
             }
 
             throw new InvalidCredentialsException(attemptsRemaining);
@@ -74,15 +109,17 @@ public sealed class AuthService(
             throw new AccountNotActiveException();
         }
 
-        // 3. Gọi method của entity để đổi trạng thái.
-        user.RegisterSuccessfulLogin(now);
+        // 3. Đổi trạng thái user.
+        RegisterSuccessfulLogin(user, now);
 
         // 4. Mở phiên mới: một family refresh token mới cho thiết bị này.
-        var result = IssueTokens(user, familyId: Guid.CreateVersion7(), request.RememberMe, now);
+        var refresh = _tokenService.CreateRefreshToken();
+        var newToken = AddRefreshToken(user, refresh.Hash, Guid.CreateVersion7(), request.RememberMe, now);
+        var result = BuildAuthResult(user, refresh.Value, newToken, now);
 
         // 5. Lưu MỘT lần cho mọi thay đổi (user + refresh token) → cùng một transaction.
         //    Hai repository dùng chung một DbContext nên gọi SaveChanges ở đâu cũng lưu cả hai.
-        await userRepository.SaveChangesAsync(ct);
+        await _userRepository.SaveChangesAsync(ct);
         return result;
     }
 
@@ -93,38 +130,40 @@ public sealed class AuthService(
             throw new SessionExpiredException();
         }
 
-        var now = timeProvider.GetUtcNow();
-        var hash = tokenService.HashRefreshToken(refreshToken);
+        var now = _timeProvider.GetUtcNow();
+        var hash = _tokenService.HashRefreshToken(refreshToken);
 
-        var stored = await refreshTokenRepository.FindByHashWithUserAsync(hash, ct);
+        var stored = await _refreshTokenRepository.FindByHashWithUserAsync(hash, ct);
 
-        if (stored is null)
+        if (stored == null)
         {
             throw new SessionExpiredException();
         }
 
-        if (stored.IsRevoked)
+        if (stored.RevokedAt != null)
         {
             // Token đã bị xoay vòng/thu hồi mà vẫn có người dùng lại → nghi bị đánh cắp.
             // Thu hồi cả family để cả kẻ gian lẫn chủ thật đều phải đăng nhập lại.
             await RevokeFamilyAsync(stored.FamilyId, now, ct);
-            await refreshTokenRepository.SaveChangesAsync(ct);
+            await _refreshTokenRepository.SaveChangesAsync(ct);
             throw new SessionExpiredException();
         }
 
         var user = stored.User;
-        if (stored.IsExpired(now) || user.Status != UserStatus.Active || user.IsLockedOut(now))
+        if (IsExpired(stored, now) || user.Status != UserStatus.Active || IsLockedOut(user, now))
         {
-            stored.Revoke(now);
-            await refreshTokenRepository.SaveChangesAsync(ct);
+            RevokeToken(stored, now, null);
+            await _refreshTokenRepository.SaveChangesAsync(ct);
             throw new SessionExpiredException();
         }
 
         // Xoay vòng: cấp token mới cùng family, thu hồi token cũ và ghi lại token thay thế.
-        var result = IssueTokens(user, stored.FamilyId, stored.IsPersistent, now, out var newToken);
-        stored.Revoke(now, replacedByTokenId: newToken.Id);
+        var refresh = _tokenService.CreateRefreshToken();
+        var newToken = AddRefreshToken(user, refresh.Hash, stored.FamilyId, stored.IsPersistent, now);
+        var result = BuildAuthResult(user, refresh.Value, newToken, now);
+        RevokeToken(stored, now, newToken.Id);
 
-        await refreshTokenRepository.SaveChangesAsync(ct);
+        await _refreshTokenRepository.SaveChangesAsync(ct);
         return result;
     }
 
@@ -132,42 +171,51 @@ public sealed class AuthService(
     {
         // Đăng xuất luôn "thành công" với FE, kể cả khi token đã hết hạn hay không tồn tại.
         // (Idempotent: bấm đăng xuất 2 lần không được báo lỗi.)
-        var now = timeProvider.GetUtcNow();
+        var now = _timeProvider.GetUtcNow();
 
         RefreshToken? stored = null;
         if (!string.IsNullOrWhiteSpace(refreshToken))
         {
-            var hash = tokenService.HashRefreshToken(refreshToken);
-            stored = await refreshTokenRepository.FindByHashAsync(hash, ct);
+            var hash = _tokenService.HashRefreshToken(refreshToken);
+            stored = await _refreshTokenRepository.FindByHashAsync(hash, ct);
         }
 
         if (revokeAllDevices)
         {
             // Xác định người dùng từ refresh token, hoặc từ access token nếu còn hạn.
-            var userId = stored?.UserId ?? currentUser.UserId;
-            if (userId is not null)
+            Guid? userId = _currentUser.UserId;
+            if (stored != null)
             {
-                var all = await refreshTokenRepository.FindActiveByUserAsync(userId.Value, ct);
-                all.ForEach(t => t.Revoke(now));
+                userId = stored.UserId;
+            }
+
+            if (userId != null)
+            {
+                var all = await _refreshTokenRepository.FindActiveByUserAsync(userId.Value, ct);
+                foreach (var token in all)
+                {
+                    RevokeToken(token, now, null);
+                }
             }
         }
-        else if (stored is not null)
+        else if (stored != null)
         {
             await RevokeFamilyAsync(stored.FamilyId, now, ct);
         }
 
-        await refreshTokenRepository.SaveChangesAsync(ct);
+        await _refreshTokenRepository.SaveChangesAsync(ct);
     }
 
     public async Task<UserDto> GetCurrentUserAsync(CancellationToken ct)
     {
-        if (currentUser.UserId is not { } userId)
+        var userId = _currentUser.UserId;
+        if (userId == null)
         {
             throw new SessionExpiredException();
         }
 
-        var user = await userRepository.FindByIdAsync(userId, ct);
-        if (user is null || user.Status != UserStatus.Active)
+        var user = await _userRepository.FindByIdAsync(userId.Value, ct);
+        if (user == null || user.Status != UserStatus.Active)
         {
             throw new SessionExpiredException();
         }
@@ -175,20 +223,106 @@ public sealed class AuthService(
         return UserDto.From(user);
     }
 
-    // ----- Hàm phụ -----
+    // ===== Luật khóa tài khoản =====
 
-    private AuthResult IssueTokens(User user, Guid familyId, bool isPersistent, DateTimeOffset now) =>
-        IssueTokens(user, familyId, isPersistent, now, out _);
-
-    private AuthResult IssueTokens(
-        User user, Guid familyId, bool isPersistent, DateTimeOffset now, out RefreshToken entity)
+    private static bool IsLockedOut(User user, DateTimeOffset now)
     {
-        var access = tokenService.CreateAccessToken(user);
-        var refresh = tokenService.CreateRefreshToken();
+        return user.LockoutEndsAt != null && user.LockoutEndsAt.Value > now;
+    }
 
-        entity = RefreshToken.Create(
-            user.Id, refresh.Hash, familyId, isPersistent, now, tokenService.RefreshTokenLifetime);
-        refreshTokenRepository.Add(entity); // chưa ghi DB, chỉ đánh dấu "sẽ INSERT" khi SaveChanges
+    /// <summary>Số giây còn lại đến khi mở khóa, làm tròn lên (0 nếu không bị khóa).</summary>
+    private static int GetLockoutRemainingSeconds(User user, DateTimeOffset now)
+    {
+        if (!IsLockedOut(user, now))
+        {
+            return 0;
+        }
+
+        return (int)Math.Ceiling((user.LockoutEndsAt!.Value - now).TotalSeconds);
+    }
+
+    /// <summary>
+    /// Ghi nhận một lần nhập sai mật khẩu.
+    /// </summary>
+    /// <returns>Số lần thử còn lại. Trả 0 nghĩa là vừa bị khóa.</returns>
+    private static int RegisterFailedLogin(User user, DateTimeOffset now)
+    {
+        // Lần khóa trước đã hết hạn → đếm lại từ đầu.
+        if (user.LockoutEndsAt != null && user.LockoutEndsAt.Value <= now)
+        {
+            user.LockoutEndsAt = null;
+            user.FailedLoginCount = 0;
+        }
+
+        user.FailedLoginCount++;
+        user.UpdatedAt = now;
+
+        if (user.FailedLoginCount >= MaxFailedLoginAttempts)
+        {
+            user.LockoutEndsAt = now.Add(LockoutDuration);
+            return 0;
+        }
+
+        return MaxFailedLoginAttempts - user.FailedLoginCount;
+    }
+
+    private static void RegisterSuccessfulLogin(User user, DateTimeOffset now)
+    {
+        user.FailedLoginCount = 0;
+        user.LockoutEndsAt = null;
+        user.LastLoginAt = now;
+        user.UpdatedAt = now;
+    }
+
+    // ===== Luật refresh token =====
+
+    private static bool IsExpired(RefreshToken token, DateTimeOffset now)
+    {
+        return token.ExpiresAt <= now;
+    }
+
+    /// <summary>Thu hồi token. Gọi nhiều lần vẫn an toàn (idempotent).</summary>
+    private static void RevokeToken(RefreshToken token, DateTimeOffset now, Guid? replacedByTokenId)
+    {
+        if (token.RevokedAt != null)
+        {
+            return;
+        }
+
+        token.RevokedAt = now;
+        token.ReplacedByTokenId = replacedByTokenId;
+    }
+
+    private async Task RevokeFamilyAsync(Guid familyId, DateTimeOffset now, CancellationToken ct)
+    {
+        var family = await _refreshTokenRepository.FindActiveByFamilyAsync(familyId, ct);
+        foreach (var token in family)
+        {
+            RevokeToken(token, now, null);
+        }
+    }
+
+    /// <summary>Tạo bản ghi refresh token mới (chưa ghi DB, chỉ đánh dấu "sẽ INSERT" khi SaveChanges).</summary>
+    private RefreshToken AddRefreshToken(
+        User user, string tokenHash, Guid familyId, bool isPersistent, DateTimeOffset now)
+    {
+        var token = new RefreshToken
+        {
+            UserId = user.Id,
+            TokenHash = tokenHash,
+            FamilyId = familyId,
+            IsPersistent = isPersistent,
+            CreatedAt = now,
+            ExpiresAt = now.Add(_tokenService.RefreshTokenLifetime),
+        };
+        _refreshTokenRepository.Add(token);
+        return token;
+    }
+
+    /// <summary>Tạo access token và gom mọi thứ controller cần (token để ghi cookie + body trả FE).</summary>
+    private AuthResult BuildAuthResult(User user, string refreshTokenValue, RefreshToken refreshToken, DateTimeOffset now)
+    {
+        var access = _tokenService.CreateAccessToken(user);
 
         var session = new AuthSessionDto(
             user.Id,
@@ -196,12 +330,11 @@ public sealed class AuthService(
             UserDto.From(user));
 
         return new AuthResult(
-            access.Value, access.ExpiresAt, refresh.Value, entity.ExpiresAt, isPersistent, session);
-    }
-
-    private async Task RevokeFamilyAsync(Guid familyId, DateTimeOffset now, CancellationToken ct)
-    {
-        var family = await refreshTokenRepository.FindActiveByFamilyAsync(familyId, ct);
-        family.ForEach(t => t.Revoke(now));
+            access.Value,
+            access.ExpiresAt,
+            refreshTokenValue,
+            refreshToken.ExpiresAt,
+            refreshToken.IsPersistent,
+            session);
     }
 }

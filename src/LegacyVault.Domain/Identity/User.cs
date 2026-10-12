@@ -3,103 +3,38 @@ using LegacyVault.Domain.Common;
 namespace LegacyVault.Domain.Identity;
 
 /// <summary>
-/// Tài khoản người dùng.
+/// Tài khoản người dùng (bảng Users).
 /// </summary>
 /// <remarks>
-/// Để ý: mọi setter đều là "private set". Bên ngoài KHÔNG thể viết user.FailedLoginCount = 0;
-/// mà phải gọi method có tên nghiệp vụ (RegisterFailedLogin, RegisterSuccessfulLogin).
-/// Nhờ vậy luật "sai 5 lần thì khóa 15 phút" chỉ nằm ở ĐÚNG MỘT chỗ — ngay trong entity.
+/// Entity chỉ chứa dữ liệu (giống @Entity với getter/setter bên Java).
+/// Luật nghiệp vụ như "sai 5 lần thì khóa 15 phút" nằm trong AuthService.
+/// Cấu hình cột, index nằm ở Infrastructure/.../Configurations/UserConfiguration.
 /// </remarks>
-public sealed class User : Entity
+public class User : Entity
 {
-    public const int MaxFailedLoginAttempts = 5;
-    public static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
+    /// <summary>Email đã chuẩn hóa (bỏ khoảng trắng, chữ thường). Duy nhất trong bảng.</summary>
+    public string Email { get; set; } = string.Empty;
 
-    // EF Core cần một constructor không tham số để tạo object khi đọc từ DB.
-    // Để private nên code của ta không dùng nhầm được.
-    private User() { }
+    public string FullName { get; set; } = string.Empty;
 
-    public string Email { get; private set; } = null!;
-    public string FullName { get; private set; } = null!;
-    public string? Phone { get; private set; }
-    public string PasswordHash { get; private set; } = null!;
-    public UserRole Role { get; private set; }
-    public UserStatus Status { get; private set; }
+    public string? Phone { get; set; }
 
-    public int FailedLoginCount { get; private set; }
-    public DateTimeOffset? LockoutEndsAt { get; private set; }
+    /// <summary>Mật khẩu ĐÃ BĂM bằng Argon2. Không bao giờ lưu mật khẩu gốc.</summary>
+    public string PasswordHash { get; set; } = string.Empty;
 
-    public DateTimeOffset CreatedAt { get; private set; }
-    public DateTimeOffset? UpdatedAt { get; private set; }
-    public DateTimeOffset? LastLoginAt { get; private set; }
+    public UserRole Role { get; set; }
 
-    /// <summary>
-    /// Factory method: cách DUY NHẤT để tạo User mới, đảm bảo object luôn hợp lệ ngay từ đầu.
-    /// </summary>
-    /// <param name="passwordHash">Mật khẩu ĐÃ BĂM. Domain không bao giờ thấy mật khẩu gốc.</param>
-    public static User Create(
-        string email,
-        string fullName,
-        string passwordHash,
-        UserRole role,
-        UserStatus status,
-        DateTimeOffset now,
-        string? phone = null)
-    {
-        return new User
-        {
-            Email = NormalizeEmail(email),
-            FullName = fullName.Trim(),
-            Phone = phone,
-            PasswordHash = passwordHash,
-            Role = role,
-            Status = status,
-            CreatedAt = now,
-        };
-    }
+    public UserStatus Status { get; set; }
 
-    /// <summary>
-    /// Chuẩn hóa email để so sánh: bỏ khoảng trắng, chữ thường.
-    /// "  An@Gmail.com " và "an@gmail.com" phải là cùng một tài khoản.
-    /// </summary>
-    public static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
+    /// <summary>Số lần nhập sai mật khẩu liên tiếp.</summary>
+    public int FailedLoginCount { get; set; }
 
-    public bool IsLockedOut(DateTimeOffset now) => LockoutEndsAt is { } end && end > now;
+    /// <summary>Thời điểm hết khóa; null = không bị khóa.</summary>
+    public DateTimeOffset? LockoutEndsAt { get; set; }
 
-    /// <summary>Số giây còn lại đến khi mở khóa (0 nếu không bị khóa).</summary>
-    public int LockoutRemainingSeconds(DateTimeOffset now) =>
-        IsLockedOut(now) ? (int)Math.Ceiling((LockoutEndsAt!.Value - now).TotalSeconds) : 0;
+    public DateTimeOffset CreatedAt { get; set; }
 
-    /// <summary>
-    /// Ghi nhận một lần nhập sai mật khẩu.
-    /// </summary>
-    /// <returns>Số lần thử còn lại. Trả 0 nghĩa là vừa bị khóa.</returns>
-    public int RegisterFailedLogin(DateTimeOffset now)
-    {
-        // Lần khóa trước đã hết hạn → đếm lại từ đầu.
-        if (LockoutEndsAt is { } end && end <= now)
-        {
-            LockoutEndsAt = null;
-            FailedLoginCount = 0;
-        }
+    public DateTimeOffset? UpdatedAt { get; set; }
 
-        FailedLoginCount++;
-        UpdatedAt = now;
-
-        if (FailedLoginCount >= MaxFailedLoginAttempts)
-        {
-            LockoutEndsAt = now.Add(LockoutDuration);
-            return 0;
-        }
-
-        return MaxFailedLoginAttempts - FailedLoginCount;
-    }
-
-    public void RegisterSuccessfulLogin(DateTimeOffset now)
-    {
-        FailedLoginCount = 0;
-        LockoutEndsAt = null;
-        LastLoginAt = now;
-        UpdatedAt = now;
-    }
+    public DateTimeOffset? LastLoginAt { get; set; }
 }
