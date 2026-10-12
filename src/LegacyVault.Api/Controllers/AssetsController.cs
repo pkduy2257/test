@@ -48,6 +48,45 @@ public sealed class AssetsController : ControllerBase
         return StatusCode(StatusCodes.Status201Created, new ApiResponse<AssetResponse>(asset));
     }
 
+    /// <summary>
+    /// PATCH /api/v1/vaults/{vaultId}/assets/{assetId} — sửa tên/mô tả tài sản (EDIT-06), không đổi nội dung.
+    /// Header If-Match = etag của tài sản. 200 kèm header ETag mới.
+    /// </summary>
+    [HttpPatch("{assetId:guid}")]
+    public async Task<IActionResult> Update(
+        Guid vaultId, Guid assetId, [FromBody] UpdateAssetRequest request, CancellationToken ct)
+    {
+        var asset = await _assetService.UpdateAssetDetailsAsync(
+            vaultId, assetId, request, Request.Headers.IfMatch.ToString(), ct);
+        Response.Headers.ETag = asset.Etag;
+        return Ok(new ApiResponse<AssetResponse>(asset));
+    }
+
+    /// <summary>
+    /// POST /api/v1/vaults/{vaultId}/assets/{assetId}/versions — thay nội dung tài sản (EDIT-03..05).
+    /// multipart/form-data gồm expectedVersionNumber và file. 201 trả tài sản với phiên bản mới.
+    /// </summary>
+    [HttpPost("{assetId:guid}/versions")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(MaxRequestBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = MaxRequestBytes)]
+    public async Task<IActionResult> UploadVersion(
+        Guid vaultId, Guid assetId, [FromForm] UploadAssetVersionRequest request, IFormFile file, CancellationToken ct)
+    {
+        await using var stream = file.OpenReadStream();
+        var upload = new UploadedFile
+        {
+            FileName = file.FileName,
+            Length = file.Length,
+            Content = stream,
+        };
+
+        var asset = await _assetService.ReplaceAssetContentAsync(
+            vaultId, assetId, request.ExpectedVersionNumber!.Value, upload, ct);
+        Response.Headers.ETag = asset.Etag;
+        return StatusCode(StatusCodes.Status201Created, new ApiResponse<AssetResponse>(asset));
+    }
+
     /// <summary>GET /api/v1/vaults/{vaultId}/assets — metadata, không có nội dung.</summary>
     [HttpGet]
     public async Task<IActionResult> GetAll(Guid vaultId, CancellationToken ct)

@@ -18,5 +18,14 @@ public interface IVaultRepository
     /// </summary>
     Task<bool> TryAddAsync(Vault vault, CancellationToken ct);
 
+    /// <summary>
+    /// Sửa tên/mô tả kho bằng MỘT câu UPDATE có điều kiện UpdatedAt = expectedUpdatedAt (EDIT-07),
+    /// đồng thời ghi UpdatedAt = now. Trả false khi không có dòng nào khớp: kho đã bị sửa sau khi client đọc.
+    /// Không đi qua change tracker, nên entity đang nạp trong request không tự đổi theo.
+    /// </summary>
+    Task<bool> TryUpdateDetailsAsync(
+        Guid vaultId, DateTimeOffset? expectedUpdatedAt, string name, string? description,
+        DateTimeOffset now, CancellationToken ct);
+
     Task SaveChangesAsync(CancellationToken ct);
 }

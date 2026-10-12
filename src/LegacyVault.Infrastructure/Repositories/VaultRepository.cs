@@ -56,6 +56,22 @@ public sealed class VaultRepository : IVaultRepository
         }
     }
 
+    public async Task<bool> TryUpdateDetailsAsync(
+        Guid vaultId, DateTimeOffset? expectedUpdatedAt, string name, string? description,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        // UPDATE Vaults SET Name, Description, UpdatedAt WHERE Id = @id AND UpdatedAt = @expected
+        // (EF tự sinh "UpdatedAt IS NULL" khi expected là null). Kiểm tra và ghi trong cùng một câu lệnh,
+        // nên hai request cùng ETag không thể cùng thành công.
+        var updated = await _db.Vaults
+            .Where(v => v.Id == vaultId && v.UpdatedAt == expectedUpdatedAt)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(v => v.Name, name)
+                .SetProperty(v => v.Description, description)
+                .SetProperty(v => v.UpdatedAt, (DateTimeOffset?)now), ct);
+        return updated == 1;
+    }
+
     public Task SaveChangesAsync(CancellationToken ct)
     {
         return _db.SaveChangesAsync(ct);

@@ -18,4 +18,11 @@ public interface IVaultService
 
     /// <summary>Một kho theo Id. Không có / của người khác → VaultNotFoundException.</summary>
     Task<VaultResponse> GetVaultAsync(Guid vaultId, CancellationToken ct);
+
+    /// <summary>
+    /// Sửa tên/mô tả kho (EDIT-01); không đổi config_version của kế hoạch. ifMatch là ETag client đang thấy (EDIT-07).
+    /// Lỗi: PreconditionRequiredException, VaultNotFoundException, VaultNotEditableException,
+    /// ValidationFailedException, EditConflictException.
+    /// </summary>
+    Task<VaultResponse> UpdateVaultAsync(Guid vaultId, UpdateVaultRequest request, string? ifMatch, CancellationToken ct);
 }

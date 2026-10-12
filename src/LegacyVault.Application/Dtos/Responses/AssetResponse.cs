@@ -1,3 +1,4 @@
+using LegacyVault.Application.Services;
 using LegacyVault.Domain.Entities;
 
 namespace LegacyVault.Application.Dtos.Responses;
@@ -16,6 +17,10 @@ public class AssetResponse
     public string? Description { get; set; }
     public string Status { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? UpdatedAt { get; set; }
+
+    /// <summary>Gửi lại trong header If-Match khi sửa tên/mô tả tài sản (EDIT-07). Đổi cả khi thay nội dung.</summary>
+    public string Etag { get; set; } = string.Empty;
 
     // Phiên bản hiện tại (mới nhất).
     public Guid VersionId { get; set; }
@@ -37,6 +42,8 @@ public class AssetResponse
             Description = asset.Description,
             Status = EnumCode.From(asset.Status),
             CreatedAt = asset.CreatedAt,
+            UpdatedAt = asset.UpdatedAt,
+            Etag = EntityTag.From(asset.UpdatedAt),
             VersionId = latest.Id,
             VersionNumber = latest.VersionNumber,
             FileName = latest.OriginalFileName,

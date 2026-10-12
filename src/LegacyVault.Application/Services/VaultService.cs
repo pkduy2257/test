@@ -9,7 +9,7 @@ using LegacyVault.Domain.Enums;
 namespace LegacyVault.Application.Services;
 
 /// <summary>
-/// Tạo và xem kho (F1, SRS v3.14.1 §5.2 bước 1).
+/// Tạo, xem và sửa tên/mô tả kho (F1, SRS v3.14.1 §5.2 bước 1; SRS v3.14.2 §5.5 EDIT-01).
 /// </summary>
 /// <remarks>
 /// SRS tách ba kết quả: tạo kho chỉ tạo không gian lưu trữ; thanh toán chỉ cấp quyền dịch vụ;
@@ -102,6 +102,68 @@ public sealed class VaultService : IVaultService
             throw new VaultNotFoundException();
         }
 
+        return await BuildResponseAsync(vault, ct);
+    }
+
+    public async Task<VaultResponse> UpdateVaultAsync(
+        Guid vaultId, UpdateVaultRequest request, string? ifMatch, CancellationToken ct)
+    {
+        var userId = RequireUserId();
+        if (string.IsNullOrWhiteSpace(ifMatch))
+        {
+            throw new PreconditionRequiredException();
+        }
+        if (!EntityTag.TryParse(ifMatch, out var expectedUpdatedAt))
+        {
+            throw new EditConflictException();
+        }
+
+        var vault = await _vaultRepository.FindByIdAsync(vaultId, ct);
+        if (vault == null || vault.OwnerId != userId)
+        {
+            throw new VaultNotFoundException();
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        VaultEditPolicy.EnsureCanEdit(vault, now);
+
+        // ETag đã cũ thì báo ngay, không cần gửi câu UPDATE.
+        if (vault.UpdatedAt != expectedUpdatedAt)
+        {
+            throw new EditConflictException();
+        }
+
+        var name = vault.Name;
+        if (request.Name != null)
+        {
+            name = request.Name.Trim();
+            if (name.Length == 0)
+            {
+                throw new ValidationFailedException("name", "Tên kho không được để trống.");
+            }
+        }
+
+        var description = vault.Description;
+        if (request.Description != null)
+        {
+            description = NormalizeOptional(request.Description);
+        }
+
+        if (name == vault.Name && description == vault.Description)
+        {
+            return await BuildResponseAsync(vault, ct); // không có gì đổi → không ghi DB, ETag giữ nguyên
+        }
+
+        // EDIT-01: tên/mô tả kho không thuộc kế hoạch bàn giao nên KHÔNG tăng Plan.ConfigVersion.
+        var updated = await _vaultRepository.TryUpdateDetailsAsync(vault.Id, expectedUpdatedAt, name, description, now, ct);
+        if (!updated)
+        {
+            throw new EditConflictException();
+        }
+
+        vault.Name = name;
+        vault.Description = description;
+        vault.UpdatedAt = now;
         return await BuildResponseAsync(vault, ct);
     }
 

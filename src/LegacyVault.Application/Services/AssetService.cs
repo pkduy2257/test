@@ -13,7 +13,8 @@ using LegacyVault.Domain.Enums;
 namespace LegacyVault.Application.Services;
 
 /// <summary>
-/// Thêm tài sản vào kho và cho Owner tải lại (F1 §5.2 bước 2 và 6; ASSET-01..04; QUOTA-01/02; SEC-02/03).
+/// Thêm tài sản vào kho, cho Owner tải lại, sửa tên/mô tả và thay nội dung
+/// (F1 §5.2 bước 2 và 6; ASSET-01..04; QUOTA-01/02; SEC-02/03; SRS v3.14.2 §5.5 EDIT-02..07).
 /// </summary>
 /// <remarks>
 /// Đường đi của một tệp khi tạo tài sản:
@@ -21,6 +22,7 @@ namespace LegacyVault.Application.Services;
 ///          ──► IEnvelopeEncryptionService.Encrypt (DEK mới, AES-256-GCM, bọc DEK bằng KEK)
 ///          ──► IFileStorage lưu BẢN MÃ ──► DB lưu metadata + DEK đã bọc
 /// Bản rõ chỉ tồn tại trong bộ nhớ của request này và bị ghi đè số 0 khi xong (SEC-03).
+/// Thay nội dung đi cùng đường đó nhưng tạo phiên bản n+1 (DEK mới) và xóa DEK của bản n, xem SaveNewVersionAsync.
 /// </remarks>
 public sealed class AssetService : IAssetService
 {
@@ -65,7 +67,7 @@ public sealed class AssetService : IAssetService
     {
         var userId = RequireUserId();
         var vault = await LoadOwnedVaultAsync(vaultId, userId, ct);
-        EnsureCanAddContent(vault);
+        VaultEditPolicy.EnsureCanEdit(vault, _timeProvider.GetUtcNow());
 
         // NFR-14: giới hạn chống lạm dụng. Hai upload đồng thời có thể cùng lọt qua ở tài sản thứ 2.000;
         // chấp nhận được vì đây không phải giới hạn tính tiền.
@@ -80,7 +82,7 @@ public sealed class AssetService : IAssetService
         try
         {
             var contentType = AssetFileValidator.DetectContentType(fileName, plaintext);
-            await EnsureStorageQuotaAsync(vault, plaintext.Length, ct);
+            await EnsureStorageQuotaAsync(vault, plaintext.Length, 0, ct);
             return await EncryptAndSaveAsync(vault, userId, request, fileName, contentType, plaintext, ct);
         }
         finally
@@ -153,46 +155,115 @@ public sealed class AssetService : IAssetService
         };
     }
 
-    // ===== Các bước nhỏ =====
-
-    /// <summary>
-    /// Owner chỉ được THÊM nội dung khi: kho còn mở (SETUP-18), kế hoạch không có hồ sơ chứng tử/bàn giao
-    /// đang chạy (SETUP-05), và quyền dịch vụ là FREE hoặc PAID_ACTIVE (OPLAN-01 chặn thêm khi ân hạn/rà soát).
-    /// </summary>
-    private static void EnsureCanAddContent(Vault vault)
+    public async Task<AssetResponse> UpdateAssetDetailsAsync(
+        Guid vaultId, Guid assetId, UpdateAssetRequest request, string? ifMatch, CancellationToken ct)
     {
-        if (vault.Status != VaultStatus.Open)
+        var userId = RequireUserId();
+        var expectedUpdatedAt = ParseIfMatch(ifMatch);
+        var vault = await LoadOwnedVaultAsync(vaultId, userId, ct);
+        var now = _timeProvider.GetUtcNow();
+        VaultEditPolicy.EnsureCanEdit(vault, now);
+
+        var asset = await _assetRepository.FindByIdAsync(vault.Id, assetId, ct);
+        if (asset == null)
         {
-            throw new VaultNotEditableException(VaultNotEditableException.VaultClosed);
+            throw new AssetNotFoundException();
         }
 
-        var plan = vault.Plan.Status;
-        var planEditable = plan == PlanStatus.Draft
-            || plan == PlanStatus.Active
-            || plan == PlanStatus.CheckinOverdue
-            || plan == PlanStatus.AwaitingCheck;
-        if (!planEditable)
+        // ETag đã cũ thì báo ngay, không cần gửi câu UPDATE.
+        if (asset.UpdatedAt != expectedUpdatedAt)
         {
-            throw new VaultNotEditableException(VaultNotEditableException.PlanLocked);
+            throw new EditConflictException();
         }
 
-        var service = vault.Entitlement.Status;
-        if (service != EntitlementStatus.Free && service != EntitlementStatus.PaidActive)
+        var name = asset.Name;
+        if (request.Name != null)
         {
-            throw new VaultNotEditableException(VaultNotEditableException.ServiceReadOnly);
+            name = request.Name.Trim();
+            if (name.Length == 0)
+            {
+                throw new ValidationFailedException("name", "Tên tài sản không được để trống.");
+            }
+        }
+
+        var description = asset.Description;
+        if (request.Description != null)
+        {
+            description = NormalizeOptional(request.Description);
+        }
+
+        if (name == asset.Name && description == asset.Description)
+        {
+            return AssetResponse.From(asset); // không có gì đổi → không ghi DB, ETag giữ nguyên
+        }
+
+        // EDIT-06: khi có module Container, đổi tên tài sản thuộc Container chưa ARCHIVED phải tăng
+        // vault.Plan.ConfigVersion trong cùng lần ghi. Hiện chưa có Container nên chưa tăng.
+        var updated = await _assetRepository.TryUpdateDetailsAsync(
+            vault.Id, asset.Id, expectedUpdatedAt, name, description, now, ct);
+        if (!updated)
+        {
+            throw new EditConflictException();
+        }
+
+        asset.Name = name;
+        asset.Description = description;
+        asset.UpdatedAt = now;
+        return AssetResponse.From(asset);
+    }
+
+    public async Task<AssetResponse> ReplaceAssetContentAsync(
+        Guid vaultId, Guid assetId, int expectedVersionNumber, UploadedFile file, CancellationToken ct)
+    {
+        var userId = RequireUserId();
+        var vault = await LoadOwnedVaultAsync(vaultId, userId, ct);
+        var now = _timeProvider.GetUtcNow();
+        VaultEditPolicy.EnsureCanEdit(vault, now);
+
+        var asset = await _assetRepository.FindByIdAsync(vault.Id, assetId, ct);
+        if (asset == null)
+        {
+            throw new AssetNotFoundException();
+        }
+
+        var current = asset.Versions.OrderByDescending(v => v.VersionNumber).First();
+        if (current.VersionNumber != expectedVersionNumber)
+        {
+            throw new EditConflictException();
+        }
+
+        var fileName = AssetFileValidator.SanitizeFileName(file.FileName);
+        var plaintext = await ReadWithLimitAsync(file, ct);
+        try
+        {
+            // EDIT-03: tệp mới qua đủ kiểm tra như tạo mới, được phép khác loại với phiên bản trước.
+            var contentType = AssetFileValidator.DetectContentType(fileName, plaintext);
+
+            // EDIT-04: bản hiện hành sẽ bị thay nên không còn tính dung lượng, trừ khi đang được bảo vệ.
+            var releasedBytes = IsProtectedVersion(current) ? 0 : current.SizeBytes;
+            await EnsureStorageQuotaAsync(vault, plaintext.Length, releasedBytes, ct);
+
+            return await SaveNewVersionAsync(vault, asset, current, userId, fileName, contentType, plaintext, now, ct);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(plaintext);
         }
     }
 
+    // ===== Các bước nhỏ =====
+
     /// <summary>
-    /// QUOTA-02: dung lượng đã dùng + tệp mới không được vượt dung lượng của hạng dịch vụ.
+    /// QUOTA-02 / EDIT-04: dung lượng đã dùng − byte của bản bị thay (releasedBytes) + tệp mới
+    /// không được vượt dung lượng của hạng dịch vụ. Tạo tài sản mới thì releasedBytes = 0.
     /// Chưa có "byte đang giữ chỗ" cho upload dở dang, nên hai upload đồng thời gần đầy kho vẫn có thể
     /// cùng lọt qua; cần thêm cơ chế giữ chỗ (reserved_bytes) để đạt đủ AC-93.
     /// </summary>
-    private async Task EnsureStorageQuotaAsync(Vault vault, long newBytes, CancellationToken ct)
+    private async Task EnsureStorageQuotaAsync(Vault vault, long newBytes, long releasedBytes, CancellationToken ct)
     {
         var usedBytes = await _assetRepository.SumCurrentSizeBytesAsync(vault.Id, ct);
         var quotaBytes = vault.Entitlement.StorageQuotaBytes;
-        if (usedBytes + newBytes > quotaBytes)
+        if (usedBytes - releasedBytes + newBytes > quotaBytes)
         {
             throw new StorageQuotaExceededException(usedBytes, quotaBytes);
         }
@@ -225,19 +296,11 @@ public sealed class AssetService : IAssetService
             CreatedAt = now,
         };
 
-        var encrypted = _encryptionService.Encrypt(plaintext, BuildAssociatedData(vault.Id, asset.Id, version.Id));
-
-        version.EncryptionAlgorithm = encrypted.Algorithm;
-        version.Nonce = encrypted.Nonce;
-        version.AuthTag = encrypted.AuthTag;
-        version.WrappedDataKey = encrypted.WrappedDataKey;
-        version.KeyId = encrypted.KeyId;
-        // Đường dẫn chỉ ghép từ Guid → không có ký tự lạ, không path traversal, không lộ tên tệp gốc.
-        version.StoragePath = vault.Id.ToString("N") + "/" + asset.Id.ToString("N") + "/" + version.Id.ToString("N") + ".bin";
+        var ciphertext = EncryptInto(vault, asset, version, plaintext);
         asset.Versions.Add(version);
 
         // Ghi tệp trước, DB sau. DB lỗi → xóa tệp vừa ghi để không để lại bản mã mồ côi.
-        await _fileStorage.SaveAsync(version.StoragePath, encrypted.Ciphertext, ct);
+        await _fileStorage.SaveAsync(version.StoragePath, ciphertext, ct);
         try
         {
             _assetRepository.Add(asset);
@@ -250,6 +313,127 @@ public sealed class AssetService : IAssetService
         }
 
         return AssetResponse.From(asset);
+    }
+
+    /// <summary>
+    /// EDIT-03/05: thêm phiên bản n+1 và cho bản n thôi dùng được, trong MỘT lần lưu DB.
+    /// </summary>
+    /// <remarks>
+    /// Bản n không bị xóa dòng (giữ lịch sử, số phiên bản, checksum), nhưng bị xóa DEK đã bọc, nonce và tag
+    /// ngay trong transaction lưu bản n+1. Mất DEK thì bản mã không giải mã được nữa (xóa bằng mật mã),
+    /// nên dù bước xóa tệp sau đó có lỗi, nội dung cũ cũng không đọc lại được. WrappedDataKey rỗng = bản đã bị xóa.
+    /// Khi có snapshot/grant/hold (IsProtectedVersion), bản được bảo vệ giữ nguyên khóa và tệp.
+    /// </remarks>
+    private async Task<AssetResponse> SaveNewVersionAsync(
+        Vault vault, Asset asset, AssetVersion current, Guid userId,
+        string fileName, string contentType, byte[] plaintext, DateTimeOffset now, CancellationToken ct)
+    {
+        var version = new AssetVersion
+        {
+            AssetId = asset.Id,
+            VersionNumber = current.VersionNumber + 1,
+            OriginalFileName = fileName,
+            ContentType = contentType,
+            SizeBytes = plaintext.Length,
+            Sha256Checksum = ComputeSha256Hex(plaintext),
+            CreatedByUserId = userId,
+            CreatedAt = now,
+        };
+        var ciphertext = EncryptInto(vault, asset, version, plaintext);
+        _assetRepository.AddVersion(version); // INSERT, không phải UPDATE (xem IAssetRepository.AddVersion)
+        asset.Versions.Add(version);
+        asset.UpdatedAt = now; // ETag của tài sản đổi theo
+
+        var eraseCurrent = !IsProtectedVersion(current);
+        if (eraseCurrent)
+        {
+            current.WrappedDataKey = Array.Empty<byte>();
+            current.Nonce = Array.Empty<byte>();
+            current.AuthTag = Array.Empty<byte>();
+        }
+
+        await _fileStorage.SaveAsync(version.StoragePath, ciphertext, ct);
+        bool saved;
+        try
+        {
+            saved = await _assetRepository.TrySaveNewVersionAsync(ct);
+        }
+        catch
+        {
+            await _fileStorage.DeleteAsync(version.StoragePath, CancellationToken.None);
+            throw;
+        }
+
+        if (!saved)
+        {
+            // Một request khác vừa lưu phiên bản n+1 trước (EDIT-07).
+            await _fileStorage.DeleteAsync(version.StoragePath, CancellationToken.None);
+            throw new EditConflictException();
+        }
+
+        if (eraseCurrent)
+        {
+            try
+            {
+                await _fileStorage.DeleteAsync(current.StoragePath, CancellationToken.None);
+            }
+            catch (IOException)
+            {
+                // Bản mã cũ đã mất DEK nên không đọc lại được; để lại tệp không làm lộ dữ liệu.
+                // Không báo lỗi cho Owner vì phiên bản mới đã lưu thành công.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Như trên.
+            }
+        }
+
+        return AssetResponse.From(asset);
+    }
+
+    /// <summary>
+    /// Mã hóa phong bì bản rõ cho một phiên bản (SEC-02): DEK mới, AAD gắn kho/tài sản/phiên bản.
+    /// Ghi thông tin mã hóa và StoragePath vào version, trả bản mã để lưu vào kho tệp.
+    /// </summary>
+    private byte[] EncryptInto(Vault vault, Asset asset, AssetVersion version, byte[] plaintext)
+    {
+        var encrypted = _encryptionService.Encrypt(plaintext, BuildAssociatedData(vault.Id, asset.Id, version.Id));
+
+        version.EncryptionAlgorithm = encrypted.Algorithm;
+        version.Nonce = encrypted.Nonce;
+        version.AuthTag = encrypted.AuthTag;
+        version.WrappedDataKey = encrypted.WrappedDataKey;
+        version.KeyId = encrypted.KeyId;
+        // Đường dẫn chỉ ghép từ Guid → không có ký tự lạ, không path traversal, không lộ tên tệp gốc.
+        version.StoragePath = vault.Id.ToString("N") + "/" + asset.Id.ToString("N") + "/" + version.Id.ToString("N") + ".bin";
+        return encrypted.Ciphertext;
+    }
+
+    /// <summary>
+    /// Phiên bản có đang được snapshot/grant/hold giữ không (QUOTA-01, EDIT-05).
+    /// Các luồng đó chưa có nên luôn false; khi làm snapshot thì thay bằng truy vấn thật.
+    /// </summary>
+    private static bool IsProtectedVersion(AssetVersion version)
+    {
+        return false;
+    }
+
+    /// <summary>
+    /// Header If-Match bắt buộc khi sửa tên/mô tả (EDIT-07). Thiếu → 428; sai định dạng → 409 để FE tải lại.
+    /// </summary>
+    private static DateTimeOffset? ParseIfMatch(string? ifMatch)
+    {
+        if (string.IsNullOrWhiteSpace(ifMatch))
+        {
+            throw new PreconditionRequiredException();
+        }
+
+        if (!EntityTag.TryParse(ifMatch, out var expectedUpdatedAt))
+        {
+            throw new EditConflictException();
+        }
+
+        return expectedUpdatedAt;
     }
 
     /// <summary>Đọc tệp vào bộ nhớ nhưng dừng ngay khi vượt 20 MiB (không tin Length client khai báo).</summary>

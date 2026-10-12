@@ -1,3 +1,4 @@
+using LegacyVault.Application.Services;
 using LegacyVault.Domain.Entities;
 
 namespace LegacyVault.Application.Dtos.Responses;
@@ -35,6 +36,9 @@ public class VaultResponse
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? UpdatedAt { get; set; }
 
+    /// <summary>Gửi lại trong header If-Match khi sửa tên/mô tả kho (EDIT-07). Đổi sau mỗi lần sửa.</summary>
+    public string Etag { get; set; } = string.Empty;
+
     /// <summary>vault phải được nạp kèm Plan và Entitlement (IVaultRepository luôn làm vậy).</summary>
     public static VaultResponse From(Vault vault, int assetCount, long storageUsedBytes)
     {
@@ -56,6 +60,7 @@ public class VaultResponse
             AssetCount = assetCount,
             CreatedAt = vault.CreatedAt,
             UpdatedAt = vault.UpdatedAt,
+            Etag = EntityTag.From(vault.UpdatedAt),
         };
     }
 }

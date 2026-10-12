@@ -59,4 +59,16 @@ public sealed class VaultsController : ControllerBase
         var vault = await _vaultService.GetVaultAsync(vaultId, ct);
         return Ok(new ApiResponse<VaultResponse>(vault));
     }
+
+    /// <summary>
+    /// PATCH /api/v1/vaults/{vaultId} — sửa tên/mô tả kho (EDIT-01). Header If-Match = etag lấy từ GET.
+    /// 200 kèm header ETag mới; 428 thiếu If-Match; 409 EDIT_CONFLICT khi etag đã cũ.
+    /// </summary>
+    [HttpPatch("{vaultId:guid}")]
+    public async Task<IActionResult> Update(Guid vaultId, [FromBody] UpdateVaultRequest request, CancellationToken ct)
+    {
+        var vault = await _vaultService.UpdateVaultAsync(vaultId, request, Request.Headers.IfMatch.ToString(), ct);
+        Response.Headers.ETag = vault.Etag;
+        return Ok(new ApiResponse<VaultResponse>(vault));
+    }
 }
