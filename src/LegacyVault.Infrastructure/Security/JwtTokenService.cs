@@ -27,7 +27,7 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options, TimeProvider t
     {
         var now = timeProvider.GetUtcNow();
         var expiresAt = now.AddMinutes(_options.AccessTokenMinutes);
-
+    
         // Claim = một mẩu thông tin về người dùng nằm trong token.
         var claims = new List<Claim>
         {

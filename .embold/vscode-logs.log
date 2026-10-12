@@ -1,0 +1,38 @@
+2026-10-12 09:47:40 info: Congratulations, your extension "Embold" is now active!
+2026-10-12 09:47:40 info: ************* init ****************
+2026-10-12 09:47:40 info: tempDirectory : c:\Users\Admin\.vscode\extensions\embold-vscode.embold-0.3.8\temp
+2026-10-12 09:47:42 info: Extraction complete for source: c:\Users\Admin\.vscode\extensions\embold-vscode.embold-0.3.8\resources\embold-scanner-archive.zip, destination: c:\Users\Admin\.vscode\extensions\embold-vscode.embold-0.3.8\temp
+2026-10-12 09:47:42 info: Extension installed on machine OS : win32
+2026-10-12 09:47:42 info: Loading issues from local database on startup (checkbox unchecked)
+2026-10-12 09:47:42 info: Using emboldDBDir: c:\Users\Admin\Downloads\Ky 5\SWP391\Project\test\.embold
+2026-10-12 09:47:42 info: NO_PROXY set from VS Code http.noProxy: 
+2026-10-12 09:47:42 info: NODE_TLS_REJECT_UNAUTHORIZED not set (SSL verification enabled)
+2026-10-12 09:47:42 info: Using system certificates for SSL verification
+2026-10-12 09:47:42 info: [STARTUP] Processing 0 total issues from database
+2026-10-12 09:47:42 info: [STARTUP] Issues sorted by file path
+2026-10-12 09:47:42 info: [STARTUP] Complete - Processed: 0, Skipped: 0
+2026-10-12 09:47:42 info: Fetched the issues from DB
+2026-10-12 09:47:42 info: Java version installed on machine : 
+java version "1.8.0_202"
+Java(TM) SE Runtime Environment (build 1.8.0_202-b08)
+Java HotSpot(TM) 64-Bit Server VM (build 25.202-b08, mixed mode)
+
+2026-10-12 09:47:42 info: Java installed on machine.
+2026-10-12 09:47:44 info: Embold extension version response:{"hasSupport":false,"version":"0.2.1","changeNotes":"<div> <p>Release Date: 30 Apr, 2025 <br><span>Bug fixes and improvements.</span></p> </div>"}
+2026-10-12 09:47:44 info: Current installed embold extension version : 0.3.8
+2026-10-12 09:47:44 info: Latest embold extension version on marketplace : 0.2.1
+2026-10-12 09:47:44 info: Current extension version: 0.3.8
+2026-10-12 09:47:44 info: Stored extension version: 
+2026-10-12 09:47:44 info: New installation or upgrade detected. Tracking plugin activation.
+2026-10-12 09:47:44 error: Error executing command: wmic csproduct get UUID Command failed: wmic csproduct get UUID
+'wmic' is not recognized as an internal or external command,
+operable program or batch file.
+
+2026-10-12 09:47:44 info: Generated and stored a new persistent UUID:
+2026-10-12 09:47:44 info: Plugin activation activity tracked successfully.
+2026-10-12 09:47:44 info: Stored version updated to the current version.
+2026-10-12 09:47:44 error: Error during activity tracking: fetch failed
+2026-10-12 09:51:15 info: Row(s) deleted
+2026-10-12 09:55:26 info: Row(s) deleted
+2026-10-12 09:56:29 info: Row(s) deleted
+2026-10-12 09:58:28 info: Row(s) deleted
