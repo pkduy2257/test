@@ -73,13 +73,16 @@ dotnet run --project src/LegacyVault.Api --launch-profile http
 
 Chọn một cách chạy để tránh trùng cổng API `5000`. Khi terminal hiện `Now listening on: http://localhost:5000`, ứng dụng đã sẵn sàng. Visual Studio tự mở Swagger khi chạy profile `http`.
 
-Ở Development, API tự tạo database `LegacyVault` nếu chưa có, áp dụng migration và thêm 3 tài khoản demo khi bảng `Users` chưa có dữ liệu. Mật khẩu chung là `Password123!`:
+Ở Development, API tự tạo database `LegacyVault` nếu chưa có, áp dụng migration và thêm 4 tài khoản demo khi bảng `Users` chưa có dữ liệu. Mật khẩu chung là `Password123!`:
 
 | Email | Role | Ghi chú |
 | --- | --- | --- |
-| `owner@legacyvault.local` | OWNER | Tài khoản thường |
+| `owner@legacyvault.local` | OWNER | Tài khoản thường, email đã xác minh |
 | `admin@legacyvault.local` | ADMIN | Tài khoản quản trị |
 | `inactive@legacyvault.local` | OWNER | Bị vô hiệu; đăng nhập nhận 403 |
+| `unverified@legacyvault.local` | OWNER | Đăng nhập được nhưng email chưa xác minh; tạo kho nhận 403 `EMAIL_NOT_VERIFIED` |
+
+Database đã có dữ liệu từ trước sẽ không được thêm tài khoản `unverified`. Muốn có đủ 4 tài khoản thì xóa database Development rồi chạy lại API.
 
 ### 1.5. Kết nối database bằng SSMS
 
@@ -190,14 +193,16 @@ legacyvault-be/
 ├── Directory.Build.props        Cấu hình chung cho mọi project (.NET 10, nullable)
 ├── Directory.Packages.props     Version NuGet khai báo một chỗ
 ├── docker-compose.yml           SQL Server cho dev
-├── http/auth.http               Kịch bản thử API bằng tay
+├── http/                        auth.http, vaults.http: kịch bản thử API bằng tay
+├── docs/HUONG-DAN-DOC-CODE.md   Hướng dẫn đọc code cho người mới
 └── src/
     ├── LegacyVault.Domain/              ① ENTITY — không phụ thuộc gì
-    │   ├── Entities/                    BaseEntity, User, RefreshToken        (≈ @Entity)
-    │   └── Enums/                       UserRole, UserStatus
+    │   ├── Entities/                    User, RefreshToken, Vault, HandoverPlan, VaultEntitlement,
+    │   │                                Asset, AssetVersion                   (≈ @Entity)
+    │   └── Enums/                       UserRole, UserStatus, VaultStatus, PlanStatus, ServiceTier, ...
     ├── LegacyVault.Application/         ② NGHIỆP VỤ — chỉ biết Domain + interface
-    │   ├── Services/                    IAuthService, AuthService             (≈ @Service)
-    │   ├── Repositories/                IUserRepository, IRefreshTokenRepository (≈ JpaRepository)
+    │   ├── Services/                    AuthService, VaultService, AssetService (≈ @Service)
+    │   ├── Repositories/                IUserRepository, IVaultRepository, ... (≈ JpaRepository)
     │   ├── Security/                    IPasswordHasher, ITokenService, ICurrentUser
     │   ├── Dtos/Requests/               LoginRequest, LogoutRequest
     │   ├── Dtos/Responses/              UserResponse, AuthSessionResponse, CurrentSessionResponse, AuthResult
@@ -322,10 +327,12 @@ Thành công: `{ "data": … }`. Lỗi: ProblemDetails có `code`.
 
 ### Kho và tài sản (chỉ role `OWNER`)
 
+Theo SRS v3.14.1: **mỗi Owner có đúng một kho** (SETUP-12), kể cả khi kho đã đóng. Kho mới luôn là `status: OPEN`, `planStatus: DRAFT`, `serviceTier: FREE`, `storageQuotaBytes: 20971520` (20 MiB). Thanh toán và kích hoạt kế hoạch làm sau, trên cùng kho này.
+
 | Method | URL | Kết quả |
 | --- | --- | --- |
-| POST | `/api/v1/vaults` | 201 kho nháp `{ name, description? }` |
-| GET | `/api/v1/vaults` | 200 danh sách kho của tôi |
+| POST | `/api/v1/vaults` | Nút "Tạo kho của tôi", body tùy chọn `{ name?, description? }`. **201** khi vừa tạo; **200** khi đã có kho (trả lại kho cũ, bỏ qua body). Gọi lặp hay song song vẫn chỉ có một kho |
+| GET | `/api/v1/vaults/me` | 200 kho của tôi / 404 `VAULT_NOT_FOUND` nếu chưa tạo |
 | GET | `/api/v1/vaults/{vaultId}` | 200 một kho |
 | POST | `/api/v1/vaults/{vaultId}/assets` | 201, `multipart/form-data`: `name`, `description?`, `file` |
 | GET | `/api/v1/vaults/{vaultId}/assets` | 200 metadata tài sản (không có nội dung) |
@@ -333,10 +340,11 @@ Thành công: `{ "data": … }`. Lỗi: ProblemDetails có `code`.
 
 | HTTP | `code` | Khi nào | Trường thêm |
 | --- | --- | --- | --- |
+| 403 | `EMAIL_NOT_VERIFIED` | Tạo kho khi email chưa xác minh (AC-01) | |
 | 404 | `VAULT_NOT_FOUND` / `ASSET_NOT_FOUND` | Không có, hoặc kho của người khác | |
-| 409 | `VAULT_ALREADY_EXISTS` | Đã có một kho chưa hoàn tất (M20) | `vaultId` |
-| 409 | `VAULT_NOT_EDITABLE` | Kho không còn `DRAFT`/`ACTIVE` | `vaultStatus` |
-| 409 | `ASSET_LIMIT_EXCEEDED` | Đủ 20 tài sản (M28) | `maxAssets` |
+| 409 | `VAULT_NOT_EDITABLE` | Không được thêm nội dung | `reason`: `VAULT_CLOSED` / `PLAN_LOCKED` (đang xét chứng tử/bàn giao) / `SERVICE_READ_ONLY` (đang ân hạn) |
+| 409 | `STORAGE_QUOTA_EXCEEDED` | Tệp mới làm vượt dung lượng của hạng dịch vụ | `usedBytes`, `quotaBytes` |
+| 409 | `ASSET_LIMIT_EXCEEDED` | Đủ 2.000 tài sản, giới hạn chống lạm dụng (NFR-14) | `maxAssets` |
 | 400 | `INVALID_ASSET_FILE` | Rỗng, > 20 MiB, sai loại, nội dung không khớp đuôi | `reason` |
 | 500 | `ASSET_INTEGRITY_FAILED` | Bản mã/khóa bị sửa hoặc KEK sai — sự cố, có ghi log | |
 

@@ -16,7 +16,6 @@ public class AssetResponse
     public string? Description { get; set; }
     public string Status { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; }
-    public DateTimeOffset? ActivatedAt { get; set; }
 
     // Phiên bản hiện tại (mới nhất).
     public Guid VersionId { get; set; }
@@ -38,7 +37,6 @@ public class AssetResponse
             Description = asset.Description,
             Status = EnumCode.From(asset.Status),
             CreatedAt = asset.CreatedAt,
-            ActivatedAt = asset.ActivatedAt,
             VersionId = latest.Id,
             VersionNumber = latest.VersionNumber,
             FileName = latest.OriginalFileName,

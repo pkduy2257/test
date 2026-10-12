@@ -4,8 +4,11 @@ using LegacyVault.Application.Exceptions;
 namespace LegacyVault.Application.Validation;
 
 /// <summary>
-/// Kiểm tra tệp chính của tài sản theo M28: PDF/DOCX/JPG/PNG/TXT, tối đa 20 MiB.
+/// Kiểm tra tệp chính của tài sản: PDF/DOCX/JPG/PNG/TXT, tối đa 20 MiB mỗi tệp (NFR-07, FILE-01).
 /// </summary>
+/// <remarks>
+/// NFR-07 của SRS v3.14.1 còn cho phép WEBP/XLSX/ZIP; ba loại này chưa được hỗ trợ ở đây.
+/// </remarks>
 /// <remarks>
 /// Không tin đuôi tệp hay Content-Type do client gửi (đổi tên virus.exe thành virus.pdf là xong).
 /// Ta đọc vài byte đầu ("magic number") để chắc tệp đúng loại, rồi tự quyết định ContentType.

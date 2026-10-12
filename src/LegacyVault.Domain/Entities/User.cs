@@ -26,6 +26,12 @@ public class User : BaseEntity
 
     public UserStatus Status { get; set; }
 
+    /// <summary>
+    /// Thời điểm xác minh email (AUTH-04); null = chưa xác minh.
+    /// SRS §11.1 tách "email đã xác minh" khỏi trạng thái tài khoản. Chưa xác minh thì không tạo được kho (AC-01).
+    /// </summary>
+    public DateTimeOffset? EmailVerifiedAt { get; set; }
+
     /// <summary>Số lần nhập sai mật khẩu liên tiếp.</summary>
     public int FailedLoginCount { get; set; }
 

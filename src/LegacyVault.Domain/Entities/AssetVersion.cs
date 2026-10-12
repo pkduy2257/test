@@ -29,7 +29,7 @@ public class AssetVersion : BaseEntity
     /// <summary>Kích thước bản rõ, tính bằng byte.</summary>
     public long SizeBytes { get; set; }
 
-    /// <summary>SHA-256 của bản rõ (hex chữ thường). Dùng để client kiểm tra tải đủ theo M15.</summary>
+    /// <summary>SHA-256 của bản rõ (hex chữ thường). Dùng để client kiểm tra tải đủ (DOWNLOAD-05).</summary>
     public string Sha256Checksum { get; set; } = string.Empty;
 
     // ---- Thông tin mã hóa ----

@@ -1,6 +1,6 @@
 namespace LegacyVault.Application.Dtos.Responses;
 
-/// <summary>Tệp đã giải mã để controller trả về cho Owner (M21).</summary>
+/// <summary>Tệp đã giải mã để controller trả về cho Owner (§5.2 bước 2: Owner xem/tải dữ liệu của mình).</summary>
 public class AssetFileContent
 {
     public byte[] Content { get; set; } = Array.Empty<byte>();

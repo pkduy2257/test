@@ -13,20 +13,17 @@ using LegacyVault.Domain.Enums;
 namespace LegacyVault.Application.Services;
 
 /// <summary>
-/// Thêm tài sản vào kho và cho Owner tải lại (Luồng 1, bước 5–7; SEC-01..04; M21, M22, M28).
+/// Thêm tài sản vào kho và cho Owner tải lại (F1 §5.2 bước 2 và 6; ASSET-01..04; QUOTA-01/02; SEC-02/03).
 /// </summary>
 /// <remarks>
 /// Đường đi của một tệp khi tạo tài sản:
-///   tệp rõ ──► kiểm tra định dạng/kích thước ──► SHA-256 bản rõ
+///   tệp rõ ──► kiểm tra định dạng/kích thước ──► kiểm tra dung lượng kho ──► SHA-256 bản rõ
 ///          ──► IEnvelopeEncryptionService.Encrypt (DEK mới, AES-256-GCM, bọc DEK bằng KEK)
 ///          ──► IFileStorage lưu BẢN MÃ ──► DB lưu metadata + DEK đã bọc
 /// Bản rõ chỉ tồn tại trong bộ nhớ của request này và bị ghi đè số 0 khi xong (SEC-03).
 /// </remarks>
 public sealed class AssetService : IAssetService
 {
-    /// <summary>M28: một kho nguồn tối đa 20 tài sản.</summary>
-    public const int MaxAssetsPerVault = 20;
-
     private readonly IVaultRepository _vaultRepository;
     private readonly IAssetRepository _assetRepository;
     private readonly IEnvelopeEncryptionService _encryptionService;
@@ -68,18 +65,14 @@ public sealed class AssetService : IAssetService
     {
         var userId = RequireUserId();
         var vault = await LoadOwnedVaultAsync(vaultId, userId, ct);
+        EnsureCanAddContent(vault);
 
-        // M21: Owner chỉ thêm/sửa tài sản khi kho còn nháp hoặc đang hoạt động bình thường.
-        if (vault.Status != VaultStatus.Draft && vault.Status != VaultStatus.Active)
-        {
-            throw new VaultNotEditableException(EnumCode.From(vault.Status));
-        }
-
-        // Hai upload đồng thời có thể cùng lọt qua khi kho có 19 tài sản; chấp nhận được ở MVP.
+        // NFR-14: giới hạn chống lạm dụng. Hai upload đồng thời có thể cùng lọt qua ở tài sản thứ 2.000;
+        // chấp nhận được vì đây không phải giới hạn tính tiền.
         var assetCount = await _assetRepository.CountByVaultIdAsync(vault.Id, ct);
-        if (assetCount >= MaxAssetsPerVault)
+        if (assetCount >= VaultLimits.MaxAssetsPerVault)
         {
-            throw new AssetLimitExceededException(MaxAssetsPerVault);
+            throw new AssetLimitExceededException(VaultLimits.MaxAssetsPerVault);
         }
 
         var fileName = AssetFileValidator.SanitizeFileName(file.FileName);
@@ -87,6 +80,7 @@ public sealed class AssetService : IAssetService
         try
         {
             var contentType = AssetFileValidator.DetectContentType(fileName, plaintext);
+            await EnsureStorageQuotaAsync(vault, plaintext.Length, ct);
             return await EncryptAndSaveAsync(vault, userId, request, fileName, contentType, plaintext, ct);
         }
         finally
@@ -161,6 +155,49 @@ public sealed class AssetService : IAssetService
 
     // ===== Các bước nhỏ =====
 
+    /// <summary>
+    /// Owner chỉ được THÊM nội dung khi: kho còn mở (SETUP-18), kế hoạch không có hồ sơ chứng tử/bàn giao
+    /// đang chạy (SETUP-05), và quyền dịch vụ là FREE hoặc PAID_ACTIVE (OPLAN-01 chặn thêm khi ân hạn/rà soát).
+    /// </summary>
+    private static void EnsureCanAddContent(Vault vault)
+    {
+        if (vault.Status != VaultStatus.Open)
+        {
+            throw new VaultNotEditableException(VaultNotEditableException.VaultClosed);
+        }
+
+        var plan = vault.Plan.Status;
+        var planEditable = plan == PlanStatus.Draft
+            || plan == PlanStatus.Active
+            || plan == PlanStatus.CheckinOverdue
+            || plan == PlanStatus.AwaitingCheck;
+        if (!planEditable)
+        {
+            throw new VaultNotEditableException(VaultNotEditableException.PlanLocked);
+        }
+
+        var service = vault.Entitlement.Status;
+        if (service != EntitlementStatus.Free && service != EntitlementStatus.PaidActive)
+        {
+            throw new VaultNotEditableException(VaultNotEditableException.ServiceReadOnly);
+        }
+    }
+
+    /// <summary>
+    /// QUOTA-02: dung lượng đã dùng + tệp mới không được vượt dung lượng của hạng dịch vụ.
+    /// Chưa có "byte đang giữ chỗ" cho upload dở dang, nên hai upload đồng thời gần đầy kho vẫn có thể
+    /// cùng lọt qua; cần thêm cơ chế giữ chỗ (reserved_bytes) để đạt đủ AC-93.
+    /// </summary>
+    private async Task EnsureStorageQuotaAsync(Vault vault, long newBytes, CancellationToken ct)
+    {
+        var usedBytes = await _assetRepository.SumCurrentSizeBytesAsync(vault.Id, ct);
+        var quotaBytes = vault.Entitlement.StorageQuotaBytes;
+        if (usedBytes + newBytes > quotaBytes)
+        {
+            throw new StorageQuotaExceededException(usedBytes, quotaBytes);
+        }
+    }
+
     private async Task<AssetResponse> EncryptAndSaveAsync(
         Vault vault, Guid userId, CreateAssetRequest request,
         string fileName, string contentType, byte[] plaintext, CancellationToken ct)
@@ -175,8 +212,6 @@ public sealed class AssetService : IAssetService
             Description = NormalizeOptional(request.Description),
             Status = AssetStatus.Locked,
             CreatedAt = now,
-            // M22: kho đang hoạt động → mốc là lúc thêm thành công; kho nháp → đặt khi kích hoạt kho.
-            ActivatedAt = vault.Status == VaultStatus.Active ? now : null,
         };
         var version = new AssetVersion
         {

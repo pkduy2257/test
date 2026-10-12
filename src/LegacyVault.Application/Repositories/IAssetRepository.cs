@@ -13,6 +13,12 @@ public interface IAssetRepository
 
     Task<int> CountByVaultIdAsync(Guid vaultId, CancellationToken ct);
 
+    /// <summary>
+    /// Tổng byte bản rõ của phiên bản hiện hành của mọi tài sản trong kho (QUOTA-01).
+    /// Chưa cộng phiên bản cũ được snapshot/grant/hold giữ, vì các luồng đó chưa có.
+    /// </summary>
+    Task<long> SumCurrentSizeBytesAsync(Guid vaultId, CancellationToken ct);
+
     /// <summary>Thêm tài sản; các AssetVersion trong asset.Versions được thêm cùng.</summary>
     void Add(Asset asset);
 

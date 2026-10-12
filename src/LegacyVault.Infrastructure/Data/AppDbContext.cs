@@ -29,6 +29,16 @@ public sealed class AppDbContext : DbContext
         get { return Set<Vault>(); }
     }
 
+    public DbSet<HandoverPlan> HandoverPlans
+    {
+        get { return Set<HandoverPlan>(); }
+    }
+
+    public DbSet<VaultEntitlement> VaultEntitlements
+    {
+        get { return Set<VaultEntitlement>(); }
+    }
+
     public DbSet<Asset> Assets
     {
         get { return Set<Asset>(); }

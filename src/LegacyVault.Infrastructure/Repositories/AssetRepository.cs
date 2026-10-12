@@ -37,6 +37,18 @@ public sealed class AssetRepository : IAssetRepository
         return _db.Assets.CountAsync(a => a.VaultId == vaultId, ct);
     }
 
+    public Task<long> SumCurrentSizeBytesAsync(Guid vaultId, CancellationToken ct)
+    {
+        // Mỗi tài sản lấy kích thước của phiên bản mới nhất; EF dịch thành một câu SELECT SUM với subquery.
+        return _db.Assets
+            .Where(a => a.VaultId == vaultId)
+            .Select(a => a.Versions
+                .OrderByDescending(v => v.VersionNumber)
+                .Select(v => v.SizeBytes)
+                .FirstOrDefault())
+            .SumAsync(ct);
+    }
+
     public void Add(Asset asset)
     {
         _db.Assets.Add(asset);

@@ -29,6 +29,8 @@ Content-Type: application/json
 GET {{api}}/auth/session
 
 ### 6. Sai mật khẩu → 401, kèm attemptsRemaining (sai 5 lần → 423 ACCOUNT_LOCKED)
+# Cẩn thận: bấm request này 5 lần sẽ khóa owner@legacyvault.local 15 phút, vaults.http và
+# trang test FE cũng không đăng nhập được. Đăng nhập đúng (request 1) trước lần thứ 5 để reset bộ đếm.
 POST {{api}}/auth/login
 Content-Type: application/json
 

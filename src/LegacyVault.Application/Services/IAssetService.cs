@@ -8,12 +8,13 @@ public interface IAssetService
 {
     /// <summary>
     /// Kiểm tra tệp, mã hóa phong bì, lưu bản mã và metadata.
-    /// Lỗi: VaultNotFoundException, VaultNotEditableException, AssetLimitExceededException, InvalidAssetFileException.
+    /// Lỗi: VaultNotFoundException, VaultNotEditableException, AssetLimitExceededException,
+    /// StorageQuotaExceededException, InvalidAssetFileException.
     /// </summary>
     Task<AssetResponse> CreateAssetAsync(Guid vaultId, CreateAssetRequest request, UploadedFile file, CancellationToken ct);
 
     Task<List<AssetResponse>> GetAssetsAsync(Guid vaultId, CancellationToken ct);
 
-    /// <summary>Owner tải tệp của mình (M21): giải mã phiên bản mới nhất và kiểm tra checksum.</summary>
+    /// <summary>Owner tải tệp của mình (§5.2 bước 2): giải mã phiên bản mới nhất và kiểm tra checksum.</summary>
     Task<AssetFileContent> DownloadAssetAsync(Guid vaultId, Guid assetId, CancellationToken ct);
 }

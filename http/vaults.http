@@ -1,6 +1,12 @@
 # Thử module Kho / Tài sản. Chạy request đăng nhập trước để có cookie.
+# Chạy lần lượt từ trên xuống: các request sau dùng id lấy từ response của request trước.
 
 @api = http://localhost:5000/api/v1
+
+# Mỗi Owner chỉ có một kho (SETUP-12): "Tạo kho của tôi" lần nào cũng trả về đúng kho đó,
+# nên lấy vaultId thẳng từ response của request 2.
+@vaultId = {{myVault.response.body.$.data.id}}
+@assetId = {{createAsset.response.body.$.data.id}}
 
 ### 1. Đăng nhập bằng Owner
 POST {{api}}/auth/login
@@ -12,8 +18,9 @@ Content-Type: application/json
   "rememberMe": true
 }
 
-### 2. Tạo kho nháp → 201 (gọi lần 2 → 409 VAULT_ALREADY_EXISTS)
-# @name createVault
+### 2. "Tạo kho của tôi" → 201 lần đầu (OPEN / kế hoạch DRAFT / FREE 20 MiB); gọi lại → 200 cùng kho
+# Body không bắt buộc; nếu kho đã có thì name/description gửi lên bị bỏ qua.
+# @name myVault
 POST {{api}}/vaults
 Content-Type: application/json
 
@@ -22,12 +29,10 @@ Content-Type: application/json
   "description": "Tài liệu gia đình"
 }
 
-### 3. Các kho của tôi
-GET {{api}}/vaults
+### 3. Kho của tôi → 200 (có storageUsedBytes / storageQuotaBytes)
+GET {{api}}/vaults/me
 
-@vaultId = {{createVault.response.body.$.data.id}}
-
-### 4. Thêm tài sản (multipart). Đổi đường dẫn tệp cho phù hợp máy bạn.
+### 4. Thêm tài sản (multipart) → 201. Tệp lấy từ ./sample-note.txt cạnh file này.
 # @name createAsset
 POST {{api}}/vaults/{{vaultId}}/assets
 Content-Type: multipart/form-data; boundary=LegacyVaultBoundary
@@ -47,8 +52,50 @@ Content-Type: text/plain
 < ./sample-note.txt
 --LegacyVaultBoundary--
 
-### 5. Danh sách tài sản (metadata, không có nội dung)
+### 5. Danh sách tài sản (metadata, không có nội dung) → 200
 GET {{api}}/vaults/{{vaultId}}/assets
 
-### 6. Owner tải tệp đã giải mã
-GET {{api}}/vaults/{{vaultId}}/assets/{{createAsset.response.body.$.data.id}}/content
+### 6. Owner tải tệp đã giải mã → 200, header X-Content-SHA256
+GET {{api}}/vaults/{{vaultId}}/assets/{{assetId}}/content
+
+
+# ===================== Các trường hợp lỗi =====================
+
+### 7. Tên kho quá 200 ký tự → 400 VALIDATION_ERROR (errors.name)
+POST {{api}}/vaults
+Content-Type: application/json
+
+{ "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" }
+
+### 8. Kho không tồn tại / không phải của mình → 404 VAULT_NOT_FOUND
+GET {{api}}/vaults/00000000-0000-0000-0000-000000000001
+
+### 9. Tài sản không tồn tại → 404 ASSET_NOT_FOUND
+GET {{api}}/vaults/{{vaultId}}/assets/00000000-0000-0000-0000-000000000001/content
+
+### 10. Đăng nhập bằng tài khoản chưa xác minh email
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "email": "unverified@legacyvault.local", "password": "Password123!" }
+
+### 11. Tạo kho khi email chưa xác minh → 403 EMAIL_NOT_VERIFIED (AC-01)
+POST {{api}}/vaults
+
+### 12. Chưa tạo kho → 404 VAULT_NOT_FOUND
+GET {{api}}/vaults/me
+
+### 13. Đăng nhập bằng Admin (không phải OWNER)
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "email": "admin@legacyvault.local", "password": "Password123!" }
+
+### 14. Admin xem kho → 403 (kho chỉ dành cho role OWNER)
+GET {{api}}/vaults/me
+
+### 15. Đăng xuất → 204
+POST {{api}}/auth/logout
+
+### 16. Chưa đăng nhập → 401
+GET {{api}}/vaults/me

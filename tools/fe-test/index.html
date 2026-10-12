@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LegacyVault – Test tạo kho</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --text:#1d2330; --muted:#6b7280; --line:#e2e5ea; --pri:#2f5bd3; --ok:#15803d; --err:#b91c1c; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 system-ui, "Segoe UI", sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width:760px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 20px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:16px; margin-bottom:16px; }
+  h2 { font-size:15px; margin:0 0 12px; }
+  label { display:block; font-weight:600; margin:10px 0 4px; }
+  input[type=text], input[type=email], input[type=password], textarea { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:6px; font:inherit; }
+  textarea { min-height:80px; resize:vertical; }
+  .hint { color:var(--muted); font-size:12px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:12px; }
+  button { padding:8px 14px; border:1px solid var(--pri); background:var(--pri); color:#fff; border-radius:6px; font:inherit; cursor:pointer; }
+  button.ghost { background:#fff; color:var(--pri); }
+  button:disabled { opacity:.5; cursor:default; }
+  .status { padding:8px 10px; border-radius:6px; margin-top:12px; display:none; white-space:pre-wrap; }
+  .status.ok { display:block; background:#ecfdf3; color:var(--ok); }
+  .status.err { display:block; background:#fef2f2; color:var(--err); }
+  .field-err { color:var(--err); font-size:12px; min-height:16px; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-size:12px; color:var(--muted); }
+  .badge { display:inline-block; padding:1px 8px; border-radius:10px; background:#eef2ff; color:var(--pri); font-size:12px; font-weight:600; }
+  code, pre { font-family: ui-monospace, Consolas, monospace; font-size:12px; }
+  pre { background:#0f172a; color:#e2e8f0; padding:10px; border-radius:6px; overflow:auto; max-height:320px; margin:0; }
+  .muted { color:var(--muted); }
+  .table-wrap { overflow-x:auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>LegacyVault – Test tạo kho</h1>
+  <p class="sub">API: <code id="apiBase"></code> · Trang này phải mở ở <code>http://localhost:5173</code> (origin đã cho phép trong CORS).</p>
+
+  <!-- 1. Đăng nhập -->
+  <section>
+    <h2>1. Phiên đăng nhập</h2>
+    <div id="sessionInfo" class="muted">Đang kiểm tra phiên…</div>
+    <form id="loginForm">
+      <label for="email">Email</label>
+      <input id="email" type="email" value="owner@legacyvault.local" required>
+      <label for="password">Mật khẩu</label>
+      <input id="password" type="password" value="Password123!" required>
+      <div class="row">
+        <button type="submit">Đăng nhập</button>
+        <button type="button" class="ghost" id="logoutBtn">Đăng xuất</button>
+      </div>
+    </form>
+    <div id="loginStatus" class="status"></div>
+  </section>
+
+  <!-- 2. Tạo kho -->
+  <section>
+    <h2>2. Tạo kho (POST /api/v1/vaults)</h2>
+    <form id="vaultForm" novalidate>
+      <label for="name">Tên kho *</label>
+      <input id="name" type="text" maxlength="250" placeholder="Ví dụ: Kho của gia đình">
+      <div class="hint"><span id="nameCount">0</span>/200 ký tự</div>
+      <div class="field-err" id="nameErr"></div>
+
+      <label for="description">Mô tả</label>
+      <textarea id="description" maxlength="1100" placeholder="Không bắt buộc"></textarea>
+      <div class="hint"><span id="descCount">0</span>/1000 ký tự</div>
+      <div class="field-err" id="descriptionErr"></div>
+
+      <label><input type="checkbox" id="skipClientCheck"> Bỏ qua kiểm tra phía FE (để test validation của BE)</label>
+      <div class="row">
+        <button type="submit" id="createBtn">Tạo kho</button>
+      </div>
+    </form>
+    <div id="vaultStatus" class="status"></div>
+  </section>
+
+  <!-- 3. Danh sách kho -->
+  <section>
+    <h2>3. Kho của tôi (GET /api/v1/vaults)</h2>
+    <div class="row" style="margin-top:0"><button type="button" class="ghost" id="reloadBtn">Tải lại</button></div>
+    <div class="table-wrap" style="margin-top:12px">
+      <table>
+        <thead><tr><th>Tên</th><th>Trạng thái</th><th>Tài sản</th><th>Tạo lúc</th><th>Id</th></tr></thead>
+        <tbody id="vaultRows"><tr><td colspan="5" class="muted">Chưa có dữ liệu.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 4. Log -->
+  <section>
+    <h2>Response gần nhất</h2>
+    <pre id="log">—</pre>
+  </section>
+</main>
+
+<script>
+  const API_BASE = new URLSearchParams(location.search).get('api') || 'http://localhost:5000';
+  document.getElementById('apiBase').textContent = API_BASE;
+  const $ = (id) => document.getElementById(id);
+
+  // fetch kèm cookie; 401 → thử refresh một lần rồi gọi lại (giống interceptor của FE thật).
+  async function api(method, path, body, retried = false) {
+    const res = await fetch(API_BASE + path, {
+      method,
+      credentials: 'include',
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    let data = null;
+    const text = await res.text();
+    if (text) { try { data = JSON.parse(text); } catch { data = text; } }
+    $('log').textContent = `${method} ${path} → ${res.status}\n\n` + (text ? JSON.stringify(data, null, 2) : '(không có body)');
+
+    if (res.status === 401 && !retried && !path.startsWith('/api/v1/auth/')) {
+      const r = await fetch(API_BASE + '/api/v1/auth/refresh', { method: 'POST', credentials: 'include' });
+      if (r.ok) return api(method, path, body, true);
+    }
+    return { ok: res.ok, status: res.status, data };
+  }
+
+  function showStatus(el, ok, msg) {
+    el.className = 'status ' + (ok ? 'ok' : 'err');
+    el.textContent = msg;
+  }
+
+  function errorMessage(r) {
+    const d = r.data || {};
+    if (r.status === 0) return 'Không gọi được API.';
+    let msg = `${r.status} ${d.code ? '[' + d.code + '] ' : ''}${d.title || ''}`;
+    if (d.code === 'VAULT_ALREADY_EXISTS' && d.vaultId) msg += `\nKho đang mở: ${d.vaultId}`;
+    if (r.status === 403) msg += '\nTài khoản không có quyền OWNER.';
+    return msg.trim();
+  }
+
+  // ===== Phiên =====
+  async function loadSession() {
+    try {
+      const r = await api('GET', '/api/v1/auth/session');
+      if (r.ok) {
+        const u = r.data.data.user;
+        $('sessionInfo').innerHTML = `Đang đăng nhập: <b></b> <span class="badge"></span>`;
+        $('sessionInfo').querySelector('b').textContent = u.email || u.fullName || u.id;
+        $('sessionInfo').querySelector('.badge').textContent = u.role || '';
+        await loadVaults();
+      } else {
+        $('sessionInfo').textContent = 'Chưa đăng nhập.';
+      }
+    } catch (e) {
+      $('sessionInfo').textContent = 'Không kết nối được API (' + e.message + '). API đã chạy chưa?';
+    }
+  }
+
+  $('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api('POST', '/api/v1/auth/login', {
+        email: $('email').value.trim(), password: $('password').value, rememberMe: false,
+      });
+      showStatus($('loginStatus'), r.ok, r.ok ? 'Đăng nhập thành công.' : errorMessage(r));
+      await loadSession();
+    } catch (err) { showStatus($('loginStatus'), false, 'Lỗi mạng: ' + err.message); }
+  });
+
+  $('logoutBtn').addEventListener('click', async () => {
+    await api('POST', '/api/v1/auth/logout');
+    showStatus($('loginStatus'), true, 'Đã đăng xuất.');
+    $('vaultRows').innerHTML = '<tr><td colspan="5" class="muted">Chưa có dữ liệu.</td></tr>';
+    await loadSession();
+  });
+
+  // ===== Tạo kho =====
+  $('name').addEventListener('input', () => $('nameCount').textContent = $('name').value.length);
+  $('description').addEventListener('input', () => $('descCount').textContent = $('description').value.length);
+
+  function clientValidate(name, desc) {
+    const errs = {};
+    if (!name.trim()) errs.name = 'Tên kho là bắt buộc.';
+    else if (name.length > 200) errs.name = 'Tên kho tối đa 200 ký tự.';
+    if (desc.length > 1000) errs.description = 'Mô tả tối đa 1000 ký tự.';
+    return errs;
+  }
+
+  function showFieldErrors(errs) {
+    $('nameErr').textContent = errs.name || '';
+    $('descriptionErr').textContent = errs.description || '';
+  }
+
+  $('vaultForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = $('name').value;
+    const description = $('description').value;
+    showFieldErrors({});
+
+    if (!$('skipClientCheck').checked) {
+      const errs = clientValidate(name, description);
+      if (Object.keys(errs).length) { showFieldErrors(errs); return; }
+    }
+
+    $('createBtn').disabled = true;
+    try {
+      const r = await api('POST', '/api/v1/vaults', { name, description: description || null });
+      if (r.ok) {
+        const v = r.data.data;
+        showStatus($('vaultStatus'), true, `Đã tạo kho "${v.name}" (${v.status}).\nId: ${v.id}`);
+        $('vaultForm').reset(); $('nameCount').textContent = 0; $('descCount').textContent = 0;
+        await loadVaults();
+      } else {
+        // 400 validation của ASP.NET: { errors: { Name: [...], Description: [...] } }
+        const fieldErrs = {};
+        const errors = (r.data && r.data.errors) || {};
+        for (const key of Object.keys(errors)) {
+          fieldErrs[key.charAt(0).toLowerCase() + key.slice(1)] = errors[key].join(' ');
+        }
+        showFieldErrors(fieldErrs);
+        showStatus($('vaultStatus'), false, errorMessage(r));
+      }
+    } catch (err) {
+      showStatus($('vaultStatus'), false, 'Lỗi mạng: ' + err.message);
+    } finally {
+      $('createBtn').disabled = false;
+    }
+  });
+
+  // ===== Danh sách kho =====
+  async function loadVaults() {
+    const r = await api('GET', '/api/v1/vaults');
+    const tbody = $('vaultRows');
+    tbody.innerHTML = '';
+    if (!r.ok) {
+      tbody.innerHTML = '<tr><td colspan="5"></td></tr>';
+      tbody.querySelector('td').textContent = errorMessage(r);
+      return;
+    }
+    const vaults = r.data.data;
+    if (!vaults.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="muted">Chưa có kho nào.</td></tr>';
+      return;
+    }
+    for (const v of vaults) {
+      const tr = document.createElement('tr');
+      const cells = [v.name + (v.description ? '\n' + v.description : ''), v.status, v.assetCount,
+                     new Date(v.createdAt).toLocaleString('vi-VN'), v.id];
+      cells.forEach((c, i) => {
+        const td = document.createElement('td');
+        if (i === 1) { const s = document.createElement('span'); s.className = 'badge'; s.textContent = c; td.appendChild(s); }
+        else if (i === 4) { const code = document.createElement('code'); code.textContent = c; td.appendChild(code); }
+        else { td.textContent = c; td.style.whiteSpace = 'pre-wrap'; }
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    }
+  }
+
+  $('reloadBtn').addEventListener('click', loadVaults);
+  loadSession();
+</script>
+</body>
+</html>

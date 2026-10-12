@@ -28,9 +28,6 @@ namespace LegacyVault.Infrastructure.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<DateTimeOffset?>("ActivatedAt")
-                        .HasColumnType("datetimeoffset");
-
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -138,6 +135,40 @@ namespace LegacyVault.Infrastructure.Data.Migrations
                     b.ToTable("AssetVersions", (string)null);
                 });
 
+            modelBuilder.Entity("LegacyVault.Domain.Entities.HandoverPlan", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("ActivatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("ConfigVersion")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("VaultId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("VaultId")
+                        .IsUnique();
+
+                    b.ToTable("HandoverPlans", (string)null);
+                });
+
             modelBuilder.Entity("LegacyVault.Domain.Entities.RefreshToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -197,6 +228,9 @@ namespace LegacyVault.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<DateTimeOffset?>("EmailVerifiedAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<int>("FailedLoginCount")
                         .HasColumnType("int");
 
@@ -247,7 +281,7 @@ namespace LegacyVault.Infrastructure.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<DateTimeOffset?>("ActivatedAt")
+                    b.Property<DateTimeOffset?>("ClosedAt")
                         .HasColumnType("datetimeoffset");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -277,10 +311,54 @@ namespace LegacyVault.Infrastructure.Data.Migrations
 
                     b.HasIndex("OwnerId")
                         .IsUnique()
-                        .HasDatabaseName("UX_Vaults_OwnerId_Open")
-                        .HasFilter("[Status] <> 'Completed'");
+                        .HasDatabaseName("UX_Vaults_OwnerId");
 
                     b.ToTable("Vaults", (string)null);
+                });
+
+            modelBuilder.Entity("LegacyVault.Domain.Entities.VaultEntitlement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("ExtraBeneficiarySlots")
+                        .HasColumnType("int");
+
+                    b.Property<int>("IncludedBeneficiarySlots")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ServiceExpiresAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<long>("StorageQuotaBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Tier")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("VaultId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("VaultId")
+                        .IsUnique();
+
+                    b.ToTable("VaultEntitlements", (string)null);
                 });
 
             modelBuilder.Entity("LegacyVault.Domain.Entities.Asset", b =>
@@ -311,6 +389,17 @@ namespace LegacyVault.Infrastructure.Data.Migrations
                     b.Navigation("Asset");
                 });
 
+            modelBuilder.Entity("LegacyVault.Domain.Entities.HandoverPlan", b =>
+                {
+                    b.HasOne("LegacyVault.Domain.Entities.Vault", "Vault")
+                        .WithOne("Plan")
+                        .HasForeignKey("LegacyVault.Domain.Entities.HandoverPlan", "VaultId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Vault");
+                });
+
             modelBuilder.Entity("LegacyVault.Domain.Entities.RefreshToken", b =>
                 {
                     b.HasOne("LegacyVault.Domain.Entities.User", "User")
@@ -333,6 +422,17 @@ namespace LegacyVault.Infrastructure.Data.Migrations
                     b.Navigation("Owner");
                 });
 
+            modelBuilder.Entity("LegacyVault.Domain.Entities.VaultEntitlement", b =>
+                {
+                    b.HasOne("LegacyVault.Domain.Entities.Vault", "Vault")
+                        .WithOne("Entitlement")
+                        .HasForeignKey("LegacyVault.Domain.Entities.VaultEntitlement", "VaultId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Vault");
+                });
+
             modelBuilder.Entity("LegacyVault.Domain.Entities.Asset", b =>
                 {
                     b.Navigation("Versions");
@@ -341,6 +441,12 @@ namespace LegacyVault.Infrastructure.Data.Migrations
             modelBuilder.Entity("LegacyVault.Domain.Entities.Vault", b =>
                 {
                     b.Navigation("Assets");
+
+                    b.Navigation("Entitlement")
+                        .IsRequired();
+
+                    b.Navigation("Plan")
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

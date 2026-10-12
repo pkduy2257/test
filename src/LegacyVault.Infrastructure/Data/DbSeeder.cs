@@ -36,17 +36,26 @@ public static class DbSeeder
         var now = time.GetUtcNow();
         var hash = hasher.Hash(DemoPassword);
         db.Users.AddRange(
-            CreateDemoUser("owner@legacyvault.local", "Nguyễn Văn Chủ", hash, UserRole.Owner, UserStatus.Active, now),
-            CreateDemoUser("admin@legacyvault.local", "Quản Trị Viên", hash, UserRole.Admin, UserStatus.Active, now),
-            CreateDemoUser("inactive@legacyvault.local", "Tài Khoản Khóa", hash, UserRole.Owner, UserStatus.Inactive, now));
+            CreateDemoUser("owner@legacyvault.local", "Nguyễn Văn Chủ", hash, UserRole.Owner, UserStatus.Active, true, now),
+            CreateDemoUser("admin@legacyvault.local", "Quản Trị Viên", hash, UserRole.Admin, UserStatus.Active, true, now),
+            CreateDemoUser("inactive@legacyvault.local", "Tài Khoản Khóa", hash, UserRole.Owner, UserStatus.Inactive, true, now),
+            // AC-01: đăng nhập được nhưng chưa xác minh email → "Tạo kho của tôi" bị từ chối.
+            CreateDemoUser("unverified@legacyvault.local", "Chưa Xác Minh", hash, UserRole.Owner, UserStatus.Active, false, now));
         await db.SaveChangesAsync();
 
         logger.LogInformation("Đã tạo tài khoản demo, mật khẩu chung: {Password}", DemoPassword);
     }
 
     private static User CreateDemoUser(
-        string email, string fullName, string passwordHash, UserRole role, UserStatus status, DateTimeOffset now)
+        string email, string fullName, string passwordHash, UserRole role, UserStatus status,
+        bool emailVerified, DateTimeOffset now)
     {
+        DateTimeOffset? emailVerifiedAt = null;
+        if (emailVerified)
+        {
+            emailVerifiedAt = now;
+        }
+
         return new User
         {
             Email = AuthService.NormalizeEmail(email),
@@ -54,6 +63,7 @@ public static class DbSeeder
             PasswordHash = passwordHash,
             Role = role,
             Status = status,
+            EmailVerifiedAt = emailVerifiedAt,
             CreatedAt = now,
         };
     }

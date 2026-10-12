@@ -56,7 +56,7 @@ public sealed class AssetsController : ControllerBase
         return Ok(new ApiResponse<List<AssetResponse>>(assets));
     }
 
-    /// <summary>GET /api/v1/vaults/{vaultId}/assets/{assetId}/content — Owner tải tệp đã giải mã (M21).</summary>
+    /// <summary>GET /api/v1/vaults/{vaultId}/assets/{assetId}/content — Owner tải tệp đã giải mã (§5.2 bước 2).</summary>
     [HttpGet("{assetId:guid}/content")]
     [Produces("application/octet-stream")]
     public async Task<IActionResult> Download(Guid vaultId, Guid assetId, CancellationToken ct)
@@ -66,7 +66,7 @@ public sealed class AssetsController : ControllerBase
         // Không cho trình duyệt/proxy lưu bản rõ vào cache; không cho đoán lại kiểu nội dung.
         Response.Headers.CacheControl = "no-store";
         Response.Headers["X-Content-Type-Options"] = "nosniff";
-        // Client so checksum sau khi tải để biết đã nhận đủ byte (M15).
+        // Client so checksum sau khi tải để biết đã nhận đủ byte (DOWNLOAD-05).
         Response.Headers["X-Content-SHA256"] = file.Sha256Checksum;
 
         return File(file.Content, file.ContentType, file.FileName);

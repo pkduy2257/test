@@ -9,10 +9,12 @@ using LegacyVault.Domain.Enums;
 namespace LegacyVault.Application.Services;
 
 /// <summary>
-/// Tạo và xem kho (Luồng 1, bước 3–4).
+/// Tạo và xem kho (F1, SRS v3.14.1 §5.2 bước 1).
 /// </summary>
 /// <remarks>
-/// Kho mới luôn ở Draft. Kích hoạt (SETUP-01: cần Executor đã chấp nhận, cấu hình điểm danh...) làm ở bước sau.
+/// SRS tách ba kết quả: tạo kho chỉ tạo không gian lưu trữ; thanh toán chỉ cấp quyền dịch vụ;
+/// kích hoạt mới bắt đầu điểm danh. Vì vậy kho mới luôn là: Vault OPEN + quyền dịch vụ FREE (20 MiB, 0 suất)
+/// + kế hoạch DRAFT. Thanh toán (luồng P) và kích hoạt (SETUP-01) làm ở các bước sau, trên CÙNG kho này.
 /// </remarks>
 public sealed class VaultService : IVaultService
 {
@@ -36,54 +38,59 @@ public sealed class VaultService : IVaultService
         _timeProvider = timeProvider;
     }
 
-    public async Task<VaultResponse> CreateVaultAsync(CreateVaultRequest request, CancellationToken ct)
+    public async Task<OpenVaultResult> OpenOrCreateMyVaultAsync(CreateVaultRequest? request, CancellationToken ct)
     {
         var userId = RequireUserId();
 
-        // Access token sống 15 phút: tài khoản có thể vừa bị vô hiệu sau khi token được cấp.
+        // 1. Kiểm tra tài khoản. Access token sống 15 phút: tài khoản có thể vừa bị vô hiệu sau khi token được cấp.
         var user = await _userRepository.FindByIdAsync(userId, ct);
         if (user == null || user.Status != UserStatus.Active)
         {
             throw new AccountNotActiveException();
         }
 
-        // M20: mỗi Owner tối đa một kho chưa hoàn tất. Hai request đồng thời vẫn lọt qua được bước này,
-        // nên DB có thêm filtered unique index làm chốt chặn cuối (xem VaultConfiguration).
-        var existing = await _vaultRepository.FindByOwnerIdAsync(userId, ct);
-        var openVault = existing.FirstOrDefault(v => v.Status != VaultStatus.Completed);
-        if (openVault != null)
+        // AC-01: chưa xác minh email thì không tạo kho; SETUP-01 kiểm tra lại khi kích hoạt.
+        if (user.EmailVerifiedAt == null)
         {
-            throw new VaultAlreadyExistsException(openVault.Id);
+            throw new EmailNotVerifiedException();
         }
 
-        var vault = new Vault
+        // 2. Đã có kho → mở lại đúng kho đó, kể cả kho CLOSED (SETUP-12, AC-104). Không bao giờ tạo kho thứ hai.
+        var existing = await _vaultRepository.FindByOwnerIdAsync(userId, ct);
+        if (existing != null)
         {
-            OwnerId = userId,
-            Name = request.Name.Trim(),
-            Description = NormalizeOptional(request.Description),
-            Status = VaultStatus.Draft,
-            CreatedAt = _timeProvider.GetUtcNow(),
-        };
+            return await BuildResultAsync(existing, false, ct);
+        }
 
-        _vaultRepository.Add(vault);
-        await _vaultRepository.SaveChangesAsync(ct);
+        // 3. Chưa có → tạo kho, kế hoạch và quyền dịch vụ trong CÙNG một lần lưu (một transaction).
+        var vault = NewFreeVault(userId, request, _timeProvider.GetUtcNow());
+        var inserted = await _vaultRepository.TryAddAsync(vault, ct);
+        if (inserted)
+        {
+            return await BuildResultAsync(vault, true, ct);
+        }
 
-        return VaultResponse.From(vault, 0);
+        // 4. Unique index trên OwnerId vừa chặn: một request khác (tab thứ hai, retry) đã tạo kho trước
+        //    chúng ta một chút. Trả đúng kho đó như request bình thường (AC-89), không báo lỗi.
+        var winner = await _vaultRepository.FindByOwnerIdAsync(userId, ct);
+        if (winner == null)
+        {
+            throw new InvalidOperationException("DB báo Owner đã có kho nhưng không đọc lại được kho đó.");
+        }
+
+        return await BuildResultAsync(winner, false, ct);
     }
 
-    public async Task<List<VaultResponse>> GetMyVaultsAsync(CancellationToken ct)
+    public async Task<VaultResponse> GetMyVaultAsync(CancellationToken ct)
     {
         var userId = RequireUserId();
-        var vaults = await _vaultRepository.FindByOwnerIdAsync(userId, ct);
-
-        var result = new List<VaultResponse>();
-        foreach (var vault in vaults)
+        var vault = await _vaultRepository.FindByOwnerIdAsync(userId, ct);
+        if (vault == null)
         {
-            var assetCount = await _assetRepository.CountByVaultIdAsync(vault.Id, ct);
-            result.Add(VaultResponse.From(vault, assetCount));
+            throw new VaultNotFoundException();
         }
 
-        return result;
+        return await BuildResponseAsync(vault, ct);
     }
 
     public async Task<VaultResponse> GetVaultAsync(Guid vaultId, CancellationToken ct)
@@ -95,8 +102,68 @@ public sealed class VaultService : IVaultService
             throw new VaultNotFoundException();
         }
 
+        return await BuildResponseAsync(vault, ct);
+    }
+
+    // ===== Các bước nhỏ =====
+
+    /// <summary>Kho mới theo §5.2 bước 1: Vault OPEN, quyền dịch vụ FREE, kế hoạch DRAFT.</summary>
+    private static Vault NewFreeVault(Guid ownerId, CreateVaultRequest? request, DateTimeOffset now)
+    {
+        var name = VaultLimits.DefaultVaultName;
+        string? description = null;
+        if (request != null)
+        {
+            var requestedName = NormalizeOptional(request.Name);
+            if (requestedName != null)
+            {
+                name = requestedName;
+            }
+            description = NormalizeOptional(request.Description);
+        }
+
+        var vault = new Vault
+        {
+            OwnerId = ownerId,
+            Name = name,
+            Description = description,
+            Status = VaultStatus.Open,
+            CreatedAt = now,
+        };
+        vault.Plan = new HandoverPlan
+        {
+            VaultId = vault.Id,
+            Status = PlanStatus.Draft,
+            ConfigVersion = 1,
+            CreatedAt = now,
+        };
+        vault.Entitlement = new VaultEntitlement
+        {
+            VaultId = vault.Id,
+            Tier = ServiceTier.Free,
+            Status = EntitlementStatus.Free,
+            StorageQuotaBytes = VaultLimits.FreeStorageQuotaBytes,
+            IncludedBeneficiarySlots = VaultLimits.FreeBeneficiarySlots,
+            ExtraBeneficiarySlots = 0,
+            CreatedAt = now,
+        };
+        return vault;
+    }
+
+    private async Task<OpenVaultResult> BuildResultAsync(Vault vault, bool created, CancellationToken ct)
+    {
+        return new OpenVaultResult
+        {
+            Vault = await BuildResponseAsync(vault, ct),
+            Created = created,
+        };
+    }
+
+    private async Task<VaultResponse> BuildResponseAsync(Vault vault, CancellationToken ct)
+    {
         var assetCount = await _assetRepository.CountByVaultIdAsync(vault.Id, ct);
-        return VaultResponse.From(vault, assetCount);
+        var usedBytes = await _assetRepository.SumCurrentSizeBytesAsync(vault.Id, ct);
+        return VaultResponse.From(vault, assetCount, usedBytes);
     }
 
     private Guid RequireUserId()
