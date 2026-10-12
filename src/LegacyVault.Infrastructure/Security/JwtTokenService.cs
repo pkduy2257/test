@@ -1,8 +1,8 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-using LegacyVault.Application.Common.Interfaces;
-using LegacyVault.Domain.Identity;
+using LegacyVault.Application.Security;
+using LegacyVault.Domain.Entities;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
@@ -17,40 +17,50 @@ namespace LegacyVault.Infrastructure.Security;
 /// (dán thử vào jwt.io) → không bao giờ để mật khẩu hay dữ liệu nhạy cảm trong JWT.
 /// Chữ ký (HMAC-SHA256 với SigningKey) đảm bảo không ai sửa được payload.
 /// </remarks>
-public sealed class JwtTokenService(IOptions<JwtOptions> options, TimeProvider timeProvider) : ITokenService
+public sealed class JwtTokenService : ITokenService
 {
-    private readonly JwtOptions _options = options.Value;
+    private readonly JwtSettings _settings;
+    private readonly TimeProvider _timeProvider;
 
-    public TimeSpan RefreshTokenLifetime => TimeSpan.FromDays(_options.RefreshTokenDays);
+    public JwtTokenService(IOptions<JwtSettings> options, TimeProvider timeProvider)
+    {
+        _settings = options.Value;
+        _timeProvider = timeProvider;
+    }
+
+    public TimeSpan RefreshTokenLifetime
+    {
+        get { return TimeSpan.FromDays(_settings.RefreshTokenDays); }
+    }
 
     public AccessToken CreateAccessToken(User user)
     {
-        var now = timeProvider.GetUtcNow();
-        var expiresAt = now.AddMinutes(_options.AccessTokenMinutes);
+        var now = _timeProvider.GetUtcNow();
+        var expiresAt = now.AddMinutes(_settings.AccessTokenMinutes);
 
         // Claim = một mẩu thông tin về người dùng nằm trong token.
         var claims = new List<Claim>
         {
-            new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),   // "sub" = subject = userId
-            new(JwtRegisteredClaimNames.Email, user.Email),
-            new(JwtClaimTypes.Role, user.Role.ToString().ToUpperInvariant()),
-            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()), // id riêng của token
+            new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),   // "sub" = subject = userId
+            new Claim(JwtRegisteredClaimNames.Email, user.Email),
+            new Claim(JwtClaimTypes.Role, user.Role.ToString().ToUpperInvariant()),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()), // id riêng của token
         };
 
         var descriptor = new SecurityTokenDescriptor
         {
-            Issuer = _options.Issuer,
-            Audience = _options.Audience,
+            Issuer = _settings.Issuer,
+            Audience = _settings.Audience,
             Subject = new ClaimsIdentity(claims),
             IssuedAt = now.UtcDateTime,
             NotBefore = now.UtcDateTime,
             Expires = expiresAt.UtcDateTime,
             SigningCredentials = new SigningCredentials(
-                CreateSigningKey(_options.SigningKey), SecurityAlgorithms.HmacSha256),
+                CreateSigningKey(_settings.SigningKey), SecurityAlgorithms.HmacSha256),
         };
 
         var token = new JsonWebTokenHandler().CreateToken(descriptor);
-        return new AccessToken(token, expiresAt);
+        return new AccessToken { Value = token, ExpiresAt = expiresAt };
     }
 
     public GeneratedRefreshToken CreateRefreshToken()
@@ -58,7 +68,7 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options, TimeProvider t
         // 64 byte ngẫu nhiên từ bộ sinh số an toàn mật mã (KHÔNG dùng new Random()).
         var bytes = RandomNumberGenerator.GetBytes(64);
         var value = Base64UrlEncoder.Encode(bytes);
-        return new GeneratedRefreshToken(value, HashRefreshToken(value));
+        return new GeneratedRefreshToken { Value = value, Hash = HashRefreshToken(value) };
     }
 
     public string HashRefreshToken(string value)
@@ -68,11 +78,9 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options, TimeProvider t
         return Convert.ToHexString(hash); // 64 ký tự hex
     }
 
-    internal static SymmetricSecurityKey CreateSigningKey(string key) => new(Encoding.UTF8.GetBytes(key));
-}
-
-/// <summary>Tên claim ngắn gọn ta tự quy ước (thay cho URL dài của Microsoft).</summary>
-public static class JwtClaimTypes
-{
-    public const string Role = "role";
+    /// <summary>Đổi chuỗi khóa thành khóa ký HMAC. Dùng chung cho lúc KÝ (ở đây) và lúc KIỂM TRA (InfrastructureConfig).</summary>
+    internal static SymmetricSecurityKey CreateSigningKey(string key)
+    {
+        return new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
+    }
 }

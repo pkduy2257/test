@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Konscious.Security.Cryptography;
-using LegacyVault.Application.Common.Interfaces;
+using LegacyVault.Application.Security;
 
 namespace LegacyVault.Infrastructure.Security;
 

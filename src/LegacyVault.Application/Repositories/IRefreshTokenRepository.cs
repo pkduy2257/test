@@ -1,4 +1,4 @@
-using LegacyVault.Domain.Identity;
+using LegacyVault.Domain.Entities;
 
 namespace LegacyVault.Application.Repositories;
 

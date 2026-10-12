@@ -1,14 +1,15 @@
-using LegacyVault.Api.Extensions;
+using LegacyVault.Api.Config;
 using LegacyVault.Application;
 using LegacyVault.Infrastructure;
-using LegacyVault.Infrastructure.Persistence;
+using LegacyVault.Infrastructure.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // ===== 1. Đăng ký service vào DI container (theo từng lớp) =====
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
-builder.Services.AddApiServices(builder.Configuration);
+builder.Services.AddApiConfig();
+builder.Services.AddCorsConfig(builder.Configuration);
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
@@ -33,7 +34,7 @@ if (!app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
 }
 
-app.UseCors(ApiServiceExtensions.FrontendCorsPolicy); // trước Authentication để preflight OPTIONS không bị 401
+app.UseCors(CorsConfig.FrontendCorsPolicy); // trước Authentication để preflight OPTIONS không bị 401
 app.UseAuthentication();     // đọc cookie/JWT → điền HttpContext.User
 app.UseAuthorization();      // kiểm tra [Authorize]
 

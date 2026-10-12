@@ -1,6 +1,6 @@
 using LegacyVault.Application.Repositories;
-using LegacyVault.Domain.Identity;
-using LegacyVault.Infrastructure.Persistence;
+using LegacyVault.Domain.Entities;
+using LegacyVault.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace LegacyVault.Infrastructure.Repositories;
