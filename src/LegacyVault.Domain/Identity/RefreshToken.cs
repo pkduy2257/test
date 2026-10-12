@@ -26,7 +26,7 @@ public sealed class RefreshToken : Entity
     /// <summary>SHA-256 của token gốc, dạng hex.</summary>
     public string TokenHash { get; private set; } = null!;
     public Guid FamilyId { get; private set; }
-
+    
     /// <summary>true = người dùng chọn "Ghi nhớ đăng nhập" → cookie sống qua khi tắt trình duyệt.</summary>
     public bool IsPersistent { get; private set; }
 

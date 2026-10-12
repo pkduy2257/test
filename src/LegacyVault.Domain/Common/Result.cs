@@ -8,7 +8,7 @@ namespace LegacyVault.Domain.Common;
 /// if (r.IsFailure) return r.Error;   // trả lỗi lên trên, không throw
 /// </example>
 public class Result
-{
+{   
     protected Result(Error? error) => Error = error;
 
     public Error? Error { get; }
