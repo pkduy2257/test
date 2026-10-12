@@ -6,46 +6,168 @@ ASP.NET Core Web API (.NET 10) theo kiến trúc 4 lớp của nhóm. Bước n�
 
 ---
 
-## 1. Chạy thử
+## 1. Cài lần đầu, kết nối database và chạy API
 
-Cần: [.NET 10 SDK](https://dotnet.microsoft.com/download), Docker Desktop.
+### 1.1. Chuẩn bị trên mỗi máy
 
-```bash
-# 1) Bật SQL Server
+- Cài [.NET 10 SDK](https://dotnet.microsoft.com/download), Git và Docker Desktop.
+- Mở Docker Desktop, đợi Docker Engine sẵn sàng.
+- Clone repository và lấy nhánh có thay đổi OpenAPI/Swagger. Nếu thay đổi còn nằm ở nhánh `feature/swagger-openAPI`, cần checkout nhánh đó sau khi nó đã được push; nếu đã merge vào `test`, checkout `test` và pull code mới.
+- Mở terminal tại thư mục chứa `LegacyVault.sln` và `docker-compose.yml`. Các lệnh dưới đây dùng PowerShell.
+
+Source đã có migration `InitialCreate` trong `src/LegacyVault.Infrastructure/Persistence/Migrations`. Khi lấy code lần đầu, **không tạo lại `InitialCreate`**. API tự áp dụng các migration chưa chạy khi khởi động ở Development.
+
+### 1.2. Khởi động SQL Server Docker
+
+```powershell
 docker compose up -d
-
-# 2) Cài công cụ migration của EF Core (một lần trên mỗi máy)
-dotnet tool install --global dotnet-ef
-
-# 3) Đặt khóa ký JWT vào kho bí mật cục bộ (KHÔNG nằm trong git)
-cd src/LegacyVault.Api
-dotnet user-secrets set "Jwt:SigningKey" "thay-bang-chuoi-ngau-nhien-dai-it-nhat-32-ky-tu"
-cd ../..
-
-# 4) Tạo migration đầu tiên (sinh code tạo bảng Users, RefreshTokens)
-dotnet ef migrations add InitialCreate \
-  --project src/LegacyVault.Infrastructure \
-  --startup-project src/LegacyVault.Api \
-  --output-dir Persistence/Migrations
-
-# 5) Chạy API → http://localhost:5000
-dotnet run --project src/LegacyVault.Api
+docker compose ps
+docker compose logs --tail 30 sqlserver
 ```
 
-Lần chạy đầu, API tự áp migration và tạo 3 tài khoản demo (mật khẩu chung `Password123!`):
+Lần đầu Docker tải image SQL Server, nên có thể mất vài phút. Kiểm tra container `legacyvault-sql` có trạng thái `Up` và log có dòng `SQL Server is now ready for client connections` trước khi chạy API.
+
+Cấu hình cổng trong `docker-compose.yml` là `14330:1433`:
+
+- API hoặc SSMS chạy trên máy kết nối tới `127.0.0.1,14330`.
+- SQL Server bên trong container vẫn dùng cổng `1433`.
+- Chọn cổng máy `14330` để tránh trùng SQL Server Express thường dùng cổng `1433`.
+- Nếu sau này API cũng chạy trong container cùng mạng Compose, địa chỉ SQL Server là `sqlserver,1433`.
+
+### 1.3. Tạo khóa JWT và build (lần đầu trên mỗi máy)
+
+```powershell
+$jwtDevKey = [guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N")
+dotnet user-secrets set "Jwt:SigningKey" $jwtDevKey --project src/LegacyVault.Api
+
+dotnet restore
+dotnet build
+```
+
+Khóa JWT được lưu trong user-secrets trên máy bạn, không nằm trong source Git. Mỗi bạn tự cấu hình khóa này một lần; không cần tạo lại mỗi lần chạy project. Cấu hình database Development đã nằm trong `src/LegacyVault.Api/appsettings.Development.json` và khớp Docker Compose.
+
+### 1.4. Chạy API bằng Visual Studio hoặc terminal
+
+Trong Visual Studio:
+
+1. Mở `LegacyVault.sln`.
+2. Chuột phải `LegacyVault.Api` → **Set as Startup Project**.
+3. Chọn profile **http** trên thanh chạy.
+4. Bấm **F5** (debug) hoặc **Ctrl + F5** (chạy bình thường).
+
+Hoặc chạy bằng PowerShell tại thư mục gốc:
+
+```powershell
+dotnet run --project src/LegacyVault.Api --launch-profile http
+```
+
+Chọn một cách chạy để tránh trùng cổng API `5000`. Khi terminal hiện `Now listening on: http://localhost:5000`, ứng dụng đã sẵn sàng. Visual Studio tự mở Swagger khi chạy profile `http`.
+
+Ở Development, API tự tạo database `LegacyVault` nếu chưa có, áp dụng migration và thêm 3 tài khoản demo khi bảng `Users` chưa có dữ liệu. Mật khẩu chung là `Password123!`:
 
 | Email | Role | Ghi chú |
 | --- | --- | --- |
 | `owner@legacyvault.local` | OWNER | Tài khoản thường |
-| `admin@legacyvault.local` | ADMIN | |
-| `inactive@legacyvault.local` | OWNER | Bị vô hiệu → đăng nhập nhận 403 |
+| `admin@legacyvault.local` | ADMIN | Tài khoản quản trị |
+| `inactive@legacyvault.local` | OWNER | Bị vô hiệu; đăng nhập nhận 403 |
 
-Thử API: mở `http/auth.http` trong VS Code (extension REST Client), Rider hoặc Visual Studio và bấm "Send Request" từng mục. Hoặc chạy FE (`npm run dev` ở cổng 5173) và đăng nhập trên giao diện.
+### 1.5. Kết nối database bằng SSMS
 
-**Lỗi hay gặp**
-- `Jwt:SigningKey phải dài ít nhất 32 ký tự` → chưa làm bước 3.
-- `pending changes … Add a new migration` → chưa làm bước 4, hoặc vừa sửa entity mà chưa tạo migration mới.
-- `A network-related or instance-specific error` → SQL Server chưa chạy (bước 1), hoặc mật khẩu không khớp `appsettings.Development.json`.
+Giữ Docker Desktop và container SQL Server đang chạy, rồi điền trong cửa sổ Connect của SSMS:
+
+| Trường | Giá trị |
+| --- | --- |
+| Server Name | `127.0.0.1,14330` |
+| Authentication | SQL Server Authentication |
+| User Name | `sa` |
+| Password | `LegacyVault_Dev123!` |
+| Database Name | `LegacyVault`, hoặc giữ mặc định rồi chọn database sau khi kết nối |
+| Encrypt | Mandatory |
+| Trust Server Certificate | Tích chọn (cấu hình Development) |
+
+Mật khẩu này chỉ dùng cho database Development của project. Nếu API chưa chạy lần đầu, database `LegacyVault` có thể chưa tồn tại; giữ Database Name mặc định để kết nối SQL Server trước.
+
+Connection string Development:
+
+```text
+Server=127.0.0.1,14330;Database=LegacyVault;User Id=sa;Password=LegacyVault_Dev123!;TrustServerCertificate=True
+```
+
+### 1.6. Test API bằng Swagger hoặc file HTTP
+
+- [Swagger UI](http://localhost:5000/swagger): xem endpoint và gọi thử bằng **Try it out** → **Execute**.
+- [OpenAPI JSON](http://localhost:5000/openapi/v1.json): tài liệu mô tả API.
+- OpenAPI và Swagger UI chỉ được bật trong môi trường Development.
+
+Gọi `POST /api/v1/auth/login` với body:
+
+```json
+{
+  "email": "owner@legacyvault.local",
+  "password": "Password123!",
+  "rememberMe": true
+}
+```
+
+Sau đó test theo thứ tự:
+
+| Request | Kết quả mong đợi |
+| --- | --- |
+| `POST /api/v1/auth/login` | 200, nhận cookie đăng nhập |
+| `GET /api/v1/auth/session` | 200, thông tin người dùng |
+| `POST /api/v1/auth/refresh` | 200, cookie mới |
+| `POST /api/v1/auth/logout` | 204 |
+| `GET /api/v1/auth/session` sau logout | 401 |
+
+Token được trả qua cookie HttpOnly, không nằm trong JSON. Trình duyệt gửi cookie cho các request API cùng host; không cần dán Bearer token. Khi test, dùng nhất quán host `localhost` cho API.
+
+Có thể mở `http/auth.http` bằng VS Code có extension REST Client, Rider hoặc Visual Studio rồi gửi từng request. Công cụ test cần lưu/gửi cookie giữa các request. Nếu dùng frontend, API đang cho phép origin `http://localhost:5173` và frontend cần gửi cookie (`withCredentials: true`). Frontend được chạy từ project frontend riêng.
+
+### 1.7. Mỗi lần mở project và sau khi pull bản mới
+
+Mỗi lần làm việc:
+
+1. Mở Docker Desktop, đợi Docker sẵn sàng.
+2. Chạy `docker compose up -d` tại thư mục project.
+3. Chạy `LegacyVault.Api` với profile `http` bằng Visual Studio hoặc terminal.
+
+Không cần tạo lại khóa JWT hay migration khi mở project. Khi nghỉ, dừng API và có thể dừng SQL Server bằng:
+
+```powershell
+docker compose stop
+```
+
+Lần sau dùng `docker compose up -d` để chạy lại. Dữ liệu được lưu trong volume `legacyvault-sql-data` và được giữ khi dừng hoặc tạo lại container. Lệnh `docker compose down -v` xóa volume và dữ liệu database; chỉ dùng khi muốn xóa dữ liệu Development.
+
+Nếu đang dùng bản cũ với cổng `1433`, sau khi lấy code mới hãy chạy lại `docker compose up -d` để cập nhật container sang cổng máy `14330`, rồi build/chạy API. SSMS cũng cần đổi Server Name sang `127.0.0.1,14330`. Nếu có connection string riêng trong user-secrets hoặc biến môi trường, cập nhật cấu hình riêng đó vì nó có thể ghi đè cấu hình trong file.
+
+### 1.8. Khi thay đổi cấu trúc database
+
+Chỉ người thêm hoặc sửa entity/cấu hình bảng mới cần tạo migration mới. Cài công cụ EF Core phiên bản tương ứng project nếu chưa có:
+
+```powershell
+dotnet tool install --global dotnet-ef --version 10.0.0
+```
+
+Ví dụ tạo migration cho một thay đổi mới (đổi `AddNewFeature` thành tên phù hợp):
+
+```powershell
+dotnet ef migrations add AddNewFeature --project src/LegacyVault.Infrastructure --startup-project src/LegacyVault.Api --output-dir Persistence/Migrations
+```
+
+Commit các file migration và model snapshot cùng thay đổi entity. Các thành viên khác pull migration đã tạo, rồi chạy API Development để áp dụng; không tạo lại migration cùng tên trên mỗi máy.
+
+### 1.9. Lỗi hay gặp
+
+- `docker-credential-desktop` không tìm thấy trong PATH hoặc terminal không nhận lệnh `docker`: đóng hẳn terminal/Visual Studio rồi mở lại để nhận PATH sau khi cài Docker; kiểm tra bằng `Get-Command docker` và `Get-Command docker-credential-desktop`.
+- Docker không kết nối được Engine: mở Docker Desktop và đợi Engine sẵn sàng.
+- Cổng `14330` đã bị chiếm: chọn cổng máy còn trống trong `docker-compose.yml` và sửa connection string Development cho khớp, sau đó chạy lại `docker compose up -d`.
+- `Jwt:SigningKey phải dài ít nhất 32 ký tự`: cấu hình user-secrets theo mục 1.3.
+- `No migrations were found`: kiểm tra đã lấy đầy đủ thư mục migrations; dừng API, **Build → Rebuild Solution**, rồi chạy lại. Source hiện đã có `InitialCreate`.
+- `pending changes ... Add a new migration`: model có thay đổi chưa được ghi vào migration; kiểm tra thay đổi entity và tạo migration mới theo mục 1.8.
+- `Login failed for user 'sa'`: kiểm tra đúng server `127.0.0.1,14330` và mật khẩu đã dùng khi khởi tạo SQL Server. Kiểm tra connection string riêng trong user-secrets/biến môi trường nếu có.
+- Lỗi kết nối SQL hoặc cửa sổ API chờ lâu trước khi hiện `Now listening`: kiểm tra `docker compose ps`, log SQL Server và connection string. API chờ khởi tạo database trước khi bắt đầu nhận request.
+- API báo cổng `5000` đã được dùng: dừng phiên API cũ trước khi chạy bằng Visual Studio hoặc terminal.
 
 ---
 
