@@ -3,10 +3,10 @@
     <ProjectReference Include="..\LegacyVault.Domain\LegacyVault.Domain.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <!--
-      Chỉ cần EF Core "lõi" để có DbSet<T> và các hàm async như SingleOrDefaultAsync.
-      KHÔNG có SqlServer ở đây: Application không biết dữ liệu nằm trong DB nào.
-    -->
-    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>
+  <!--
+    Application KHÔNG tham chiếu EF Core: service chỉ làm việc qua interface Repository.
+    Câu truy vấn EF nằm ở Infrastructure/Repositories.
+  -->
 </Project>

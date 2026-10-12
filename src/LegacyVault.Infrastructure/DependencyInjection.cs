@@ -1,6 +1,8 @@
 using System.Text;
 using LegacyVault.Application.Common.Interfaces;
+using LegacyVault.Application.Repositories;
 using LegacyVault.Infrastructure.Persistence;
+using LegacyVault.Infrastructure.Repositories;
 using LegacyVault.Infrastructure.Security;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -24,8 +26,11 @@ public static class DependencyInjection
             ?? throw new InvalidOperationException("Thiếu ConnectionStrings:Default trong appsettings.");
 
         services.AddDbContext<AppDbContext>(options => options.UseSqlServer(connectionString));
-        // Ai xin IAppDbContext sẽ nhận đúng AppDbContext của request hiện tại.
-        services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
+
+        // ---- Repository ----
+        // Scoped (mỗi request một instance) để các repository dùng chung AppDbContext của request đó.
+        services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 
         // ---- Bảo mật ----
         services.AddSingleton<IPasswordHasher, Argon2PasswordHasher>();

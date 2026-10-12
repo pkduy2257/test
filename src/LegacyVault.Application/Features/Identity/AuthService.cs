@@ -1,7 +1,7 @@
 using LegacyVault.Application.Common.Interfaces;
 using LegacyVault.Application.Exceptions;
+using LegacyVault.Application.Repositories;
 using LegacyVault.Domain.Identity;
-using Microsoft.EntityFrameworkCore;
 
 namespace LegacyVault.Application.Features.Identity;
 
@@ -23,7 +23,8 @@ public interface IAuthService
 /// TimeProvider (có sẵn từ .NET 8) thay cho DateTime.UtcNow để test được "15 phút sau".
 /// </remarks>
 public sealed class AuthService(
-    IAppDbContext db,
+    IUserRepository userRepository,
+    IRefreshTokenRepository refreshTokenRepository,
     IPasswordHasher passwordHasher,
     ITokenService tokenService,
     ICurrentUser currentUser,
@@ -37,8 +38,8 @@ public sealed class AuthService(
         var now = timeProvider.GetUtcNow();
         var email = User.NormalizeEmail(request.Email);
 
-        // 1. Tải dữ liệu. EF dịch biểu thức này thành: SELECT ... WHERE Email = @email
-        var user = await db.Users.SingleOrDefaultAsync(u => u.Email == email, ct);
+        // 1. Tải dữ liệu.
+        var user = await userRepository.FindByEmailAsync(email, ct);
 
         if (user is null)
         {
@@ -58,7 +59,7 @@ public sealed class AuthService(
         if (!passwordHasher.Verify(request.Password, user.PasswordHash))
         {
             var attemptsRemaining = user.RegisterFailedLogin(now);
-            await db.SaveChangesAsync(ct); // lưu số lần sai
+            await userRepository.SaveChangesAsync(ct); // lưu số lần sai
             if (attemptsRemaining == 0)
             {
                 throw new AccountLockedException(user.LockoutRemainingSeconds(now));
@@ -80,7 +81,8 @@ public sealed class AuthService(
         var result = IssueTokens(user, familyId: Guid.CreateVersion7(), request.RememberMe, now);
 
         // 5. Lưu MỘT lần cho mọi thay đổi (user + refresh token) → cùng một transaction.
-        await db.SaveChangesAsync(ct);
+        //    Hai repository dùng chung một DbContext nên gọi SaveChanges ở đâu cũng lưu cả hai.
+        await userRepository.SaveChangesAsync(ct);
         return result;
     }
 
@@ -94,10 +96,7 @@ public sealed class AuthService(
         var now = timeProvider.GetUtcNow();
         var hash = tokenService.HashRefreshToken(refreshToken);
 
-        // Include = JOIN để lấy luôn User trong một câu SQL.
-        var stored = await db.RefreshTokens
-            .Include(t => t.User)
-            .SingleOrDefaultAsync(t => t.TokenHash == hash, ct);
+        var stored = await refreshTokenRepository.FindByHashWithUserAsync(hash, ct);
 
         if (stored is null)
         {
@@ -109,7 +108,7 @@ public sealed class AuthService(
             // Token đã bị xoay vòng/thu hồi mà vẫn có người dùng lại → nghi bị đánh cắp.
             // Thu hồi cả family để cả kẻ gian lẫn chủ thật đều phải đăng nhập lại.
             await RevokeFamilyAsync(stored.FamilyId, now, ct);
-            await db.SaveChangesAsync(ct);
+            await refreshTokenRepository.SaveChangesAsync(ct);
             throw new SessionExpiredException();
         }
 
@@ -117,7 +116,7 @@ public sealed class AuthService(
         if (stored.IsExpired(now) || user.Status != UserStatus.Active || user.IsLockedOut(now))
         {
             stored.Revoke(now);
-            await db.SaveChangesAsync(ct);
+            await refreshTokenRepository.SaveChangesAsync(ct);
             throw new SessionExpiredException();
         }
 
@@ -125,7 +124,7 @@ public sealed class AuthService(
         var result = IssueTokens(user, stored.FamilyId, stored.IsPersistent, now, out var newToken);
         stored.Revoke(now, replacedByTokenId: newToken.Id);
 
-        await db.SaveChangesAsync(ct);
+        await refreshTokenRepository.SaveChangesAsync(ct);
         return result;
     }
 
@@ -139,7 +138,7 @@ public sealed class AuthService(
         if (!string.IsNullOrWhiteSpace(refreshToken))
         {
             var hash = tokenService.HashRefreshToken(refreshToken);
-            stored = await db.RefreshTokens.SingleOrDefaultAsync(t => t.TokenHash == hash, ct);
+            stored = await refreshTokenRepository.FindByHashAsync(hash, ct);
         }
 
         if (revokeAllDevices)
@@ -148,9 +147,7 @@ public sealed class AuthService(
             var userId = stored?.UserId ?? currentUser.UserId;
             if (userId is not null)
             {
-                var all = await db.RefreshTokens
-                    .Where(t => t.UserId == userId && t.RevokedAt == null)
-                    .ToListAsync(ct);
+                var all = await refreshTokenRepository.FindActiveByUserAsync(userId.Value, ct);
                 all.ForEach(t => t.Revoke(now));
             }
         }
@@ -159,7 +156,7 @@ public sealed class AuthService(
             await RevokeFamilyAsync(stored.FamilyId, now, ct);
         }
 
-        await db.SaveChangesAsync(ct);
+        await refreshTokenRepository.SaveChangesAsync(ct);
     }
 
     public async Task<UserDto> GetCurrentUserAsync(CancellationToken ct)
@@ -169,8 +166,7 @@ public sealed class AuthService(
             throw new SessionExpiredException();
         }
 
-        // AsNoTracking: chỉ đọc, không sửa → EF không cần theo dõi thay đổi, nhanh hơn.
-        var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(u => u.Id == userId, ct);
+        var user = await userRepository.FindByIdAsync(userId, ct);
         if (user is null || user.Status != UserStatus.Active)
         {
             throw new SessionExpiredException();
@@ -192,7 +188,7 @@ public sealed class AuthService(
 
         entity = RefreshToken.Create(
             user.Id, refresh.Hash, familyId, isPersistent, now, tokenService.RefreshTokenLifetime);
-        db.RefreshTokens.Add(entity); // chưa ghi DB, chỉ đánh dấu "sẽ INSERT" khi SaveChanges
+        refreshTokenRepository.Add(entity); // chưa ghi DB, chỉ đánh dấu "sẽ INSERT" khi SaveChanges
 
         var session = new AuthSessionDto(
             user.Id,
@@ -205,9 +201,7 @@ public sealed class AuthService(
 
     private async Task RevokeFamilyAsync(Guid familyId, DateTimeOffset now, CancellationToken ct)
     {
-        var family = await db.RefreshTokens
-            .Where(t => t.FamilyId == familyId && t.RevokedAt == null)
-            .ToListAsync(ct);
+        var family = await refreshTokenRepository.FindActiveByFamilyAsync(familyId, ct);
         family.ForEach(t => t.Revoke(now));
     }
 }

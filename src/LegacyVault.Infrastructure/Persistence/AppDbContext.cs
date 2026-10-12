@@ -1,14 +1,13 @@
-using LegacyVault.Application.Common.Interfaces;
 using LegacyVault.Domain.Identity;
 using Microsoft.EntityFrameworkCore;
 
 namespace LegacyVault.Infrastructure.Persistence;
 
 /// <summary>
-/// DbContext thật của EF Core, cài đặt IAppDbContext mà service dùng.
+/// DbContext thật của EF Core. Chỉ các Repository (thư mục Infrastructure/Repositories) dùng trực tiếp.
 /// </summary>
 public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
-    : DbContext(options), IAppDbContext
+    : DbContext(options)
 {
     // Mỗi DbSet ứng với một bảng. "=> Set<T>()" để không cần setter.
     public DbSet<User> Users => Set<User>();
