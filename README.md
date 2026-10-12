@@ -44,7 +44,17 @@ dotnet restore
 dotnet build
 ```
 
-Khóa JWT được lưu trong user-secrets trên máy bạn, không nằm trong source Git. Mỗi bạn tự cấu hình khóa này một lần; không cần tạo lại mỗi lần chạy project. Cấu hình database Development đã nằm trong `src/LegacyVault.Api/appsettings.Development.json` và khớp Docker Compose.
+Khóa JWT được lưu trong user-secrets trên máy bạn, không nằm trong source Git. Mỗi bạn tự cấu hình khóa này một lần; không cần tạo lại mỗi lần chạy project.
+
+Từ khi có module Kho/Tài sản, API cần thêm **khóa chủ mã hóa tài sản (KEK)** — 32 byte ngẫu nhiên, Base64. Thiếu khóa này API dừng ngay khi khởi động:
+
+```powershell
+$kek = New-Object byte[] 32
+[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($kek)
+dotnet user-secrets set "Encryption:Keys:kek-2026-10" ([Convert]::ToBase64String($kek)) --project src/LegacyVault.Api
+```
+
+`kek-2026-10` phải trùng `Encryption:ActiveKeyId` trong `appsettings.json`. **Không đổi hoặc xóa khóa này** khi DB đã có tài sản: mất KEK = mọi tệp đã mã hóa không mở lại được (SEC-07). Bản mã được lưu ở `src/LegacyVault.Api/App_Data/asset-blobs/` (đã nằm trong `.gitignore`). Cấu hình database Development đã nằm trong `src/LegacyVault.Api/appsettings.Development.json` và khớp Docker Compose.
 
 ### 1.4. Chạy API bằng Visual Studio hoặc terminal
 
@@ -309,6 +319,28 @@ Thành công: `{ "data": … }`. Lỗi: ProblemDetails có `code`.
 | 403 | `ACCOUNT_NOT_ACTIVE` | Tài khoản bị vô hiệu | |
 | 401 | `SESSION_EXPIRED` | Refresh token hết hạn/bị thu hồi | |
 | 500 | `INTERNAL_ERROR` | Lỗi bất ngờ (xem log theo `traceId`) | |
+
+### Kho và tài sản (chỉ role `OWNER`)
+
+| Method | URL | Kết quả |
+| --- | --- | --- |
+| POST | `/api/v1/vaults` | 201 kho nháp `{ name, description? }` |
+| GET | `/api/v1/vaults` | 200 danh sách kho của tôi |
+| GET | `/api/v1/vaults/{vaultId}` | 200 một kho |
+| POST | `/api/v1/vaults/{vaultId}/assets` | 201, `multipart/form-data`: `name`, `description?`, `file` |
+| GET | `/api/v1/vaults/{vaultId}/assets` | 200 metadata tài sản (không có nội dung) |
+| GET | `/api/v1/vaults/{vaultId}/assets/{assetId}/content` | 200 tệp đã giải mã, header `X-Content-SHA256` |
+
+| HTTP | `code` | Khi nào | Trường thêm |
+| --- | --- | --- | --- |
+| 404 | `VAULT_NOT_FOUND` / `ASSET_NOT_FOUND` | Không có, hoặc kho của người khác | |
+| 409 | `VAULT_ALREADY_EXISTS` | Đã có một kho chưa hoàn tất (M20) | `vaultId` |
+| 409 | `VAULT_NOT_EDITABLE` | Kho không còn `DRAFT`/`ACTIVE` | `vaultStatus` |
+| 409 | `ASSET_LIMIT_EXCEEDED` | Đủ 20 tài sản (M28) | `maxAssets` |
+| 400 | `INVALID_ASSET_FILE` | Rỗng, > 20 MiB, sai loại, nội dung không khớp đuôi | `reason` |
+| 500 | `ASSET_INTEGRITY_FAILED` | Bản mã/khóa bị sửa hoặc KEK sai — sự cố, có ghi log | |
+
+Mỗi phiên bản tệp được mã hóa phong bì AES-256-GCM: khóa dữ liệu riêng cho từng phiên bản, bọc bằng KEK nằm ngoài DB. Xem `AssetService` và `AesGcmEnvelopeEncryptionService`.
 
 ### Ghi chú cho FE
 

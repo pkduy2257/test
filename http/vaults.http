@@ -1,0 +1,54 @@
+# Thử module Kho / Tài sản. Chạy request đăng nhập trước để có cookie.
+
+@api = http://localhost:5000/api/v1
+
+### 1. Đăng nhập bằng Owner
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "owner@legacyvault.local",
+  "password": "Password123!",
+  "rememberMe": true
+}
+
+### 2. Tạo kho nháp → 201 (gọi lần 2 → 409 VAULT_ALREADY_EXISTS)
+# @name createVault
+POST {{api}}/vaults
+Content-Type: application/json
+
+{
+  "name": "Kho của tôi",
+  "description": "Tài liệu gia đình"
+}
+
+### 3. Các kho của tôi
+GET {{api}}/vaults
+
+@vaultId = {{createVault.response.body.$.data.id}}
+
+### 4. Thêm tài sản (multipart). Đổi đường dẫn tệp cho phù hợp máy bạn.
+# @name createAsset
+POST {{api}}/vaults/{{vaultId}}/assets
+Content-Type: multipart/form-data; boundary=LegacyVaultBoundary
+
+--LegacyVaultBoundary
+Content-Disposition: form-data; name="name"
+
+Ghi chú gửi con
+--LegacyVaultBoundary
+Content-Disposition: form-data; name="description"
+
+Tệp văn bản thử
+--LegacyVaultBoundary
+Content-Disposition: form-data; name="file"; filename="note.txt"
+Content-Type: text/plain
+
+< ./sample-note.txt
+--LegacyVaultBoundary--
+
+### 5. Danh sách tài sản (metadata, không có nội dung)
+GET {{api}}/vaults/{{vaultId}}/assets
+
+### 6. Owner tải tệp đã giải mã
+GET {{api}}/vaults/{{vaultId}}/assets/{{createAsset.response.body.$.data.id}}/content

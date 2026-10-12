@@ -24,6 +24,21 @@ public sealed class AppDbContext : DbContext
         get { return Set<RefreshToken>(); }
     }
 
+    public DbSet<Vault> Vaults
+    {
+        get { return Set<Vault>(); }
+    }
+
+    public DbSet<Asset> Assets
+    {
+        get { return Set<Asset>(); }
+    }
+
+    public DbSet<AssetVersion> AssetVersions
+    {
+        get { return Set<AssetVersion>(); }
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // Tự tìm mọi class IEntityTypeConfiguration<T> trong project này (thư mục Data/Configurations/)

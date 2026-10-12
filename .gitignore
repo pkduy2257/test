@@ -5,3 +5,6 @@ obj/
 *.user
 *.suo
 appsettings.*.local.json
+
+# Bản mã tài sản lưu cục bộ khi dev
+App_Data/

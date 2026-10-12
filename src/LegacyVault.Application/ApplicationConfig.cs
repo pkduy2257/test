@@ -13,7 +13,9 @@ public static class ApplicationConfig
     {
         // Scoped = mỗi HTTP request một instance, dùng chung DbContext của request đó.
         // Thêm service mới: thêm một dòng, giữ thứ tự alphabet để tránh conflict khi merge.
+        services.AddScoped<IAssetService, AssetService>();
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IVaultService, VaultService>();
 
         return services;
     }

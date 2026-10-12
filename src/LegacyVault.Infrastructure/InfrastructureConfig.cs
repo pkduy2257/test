@@ -1,9 +1,11 @@
 using System.Text;
 using LegacyVault.Application.Repositories;
 using LegacyVault.Application.Security;
+using LegacyVault.Application.Storage;
 using LegacyVault.Infrastructure.Data;
 using LegacyVault.Infrastructure.Repositories;
 using LegacyVault.Infrastructure.Security;
+using LegacyVault.Infrastructure.Storage;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -30,6 +32,7 @@ public static class InfrastructureConfig
         AddDatabase(services, configuration);
         AddRepositories(services);
         AddSecurity(services);
+        AddEncryptionAndStorage(services, configuration);
         AddJwtAuthentication(services, configuration);
 
         return services;
@@ -51,6 +54,8 @@ public static class InfrastructureConfig
         // Scoped (mỗi request một instance) để các repository dùng chung AppDbContext của request đó.
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+        services.AddScoped<IVaultRepository, VaultRepository>();
+        services.AddScoped<IAssetRepository, AssetRepository>();
     }
 
     private static void AddSecurity(IServiceCollection services)
@@ -59,6 +64,26 @@ public static class InfrastructureConfig
         services.AddSingleton<ITokenService, JwtTokenService>();
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();
+    }
+
+    private static void AddEncryptionAndStorage(IServiceCollection services, IConfiguration configuration)
+    {
+        // Kiểm tra KEK ngay lúc khởi động, giống Jwt:SigningKey: thiếu/sai khóa thì app dừng với hướng dẫn rõ ràng.
+        services.AddOptions<EncryptionSettings>()
+            .Bind(configuration.GetSection(EncryptionSettings.SectionName))
+            .Validate(
+                settings => settings.ActiveKeyId.Length > 0
+                    && settings.Keys.ContainsKey(settings.ActiveKeyId)
+                    && settings.Keys.Values.All(AesGcmEnvelopeEncryptionService.IsValidKey),
+                "Thiếu khóa chủ mã hóa tài sản. Mỗi khóa trong Encryption:Keys phải là 32 byte Base64 và phải có khóa " +
+                "trùng Encryption:ActiveKeyId. Xem README mục 1.3 để tạo bằng dotnet user-secrets.")
+            .ValidateOnStart();
+
+        services.AddOptions<FileStorageSettings>()
+            .Bind(configuration.GetSection(FileStorageSettings.SectionName));
+
+        services.AddSingleton<IEnvelopeEncryptionService, AesGcmEnvelopeEncryptionService>();
+        services.AddSingleton<IFileStorage, LocalFileStorage>();
     }
 
     private static void AddJwtAuthentication(IServiceCollection services, IConfiguration configuration)

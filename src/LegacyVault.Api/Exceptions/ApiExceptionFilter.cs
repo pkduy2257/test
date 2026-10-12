@@ -22,10 +22,12 @@ namespace LegacyVault.Api.Exceptions;
 public sealed class ApiExceptionFilter : IExceptionFilter
 {
     private readonly ProblemDetailsFactory _problemDetailsFactory;
+    private readonly ILogger<ApiExceptionFilter> _logger;
 
-    public ApiExceptionFilter(ProblemDetailsFactory problemDetailsFactory)
+    public ApiExceptionFilter(ProblemDetailsFactory problemDetailsFactory, ILogger<ApiExceptionFilter> logger)
     {
         _problemDetailsFactory = problemDetailsFactory;
+        _logger = logger;
     }
 
     public void OnException(ExceptionContext context)
@@ -34,6 +36,13 @@ public sealed class ApiExceptionFilter : IExceptionFilter
         if (exception == null)
         {
             return; // không phải lỗi nghiệp vụ → để GlobalExceptionHandler xử lý
+        }
+
+        // Lỗi 5xx "dự đoán được" (ví dụ ASSET_INTEGRITY_FAILED) vẫn là sự cố cần điều tra → ghi log.
+        if (exception.StatusCode >= 500)
+        {
+            _logger.LogError(exception, "Sự cố {Code} tại {Method} {Path}",
+                exception.ErrorCode, context.HttpContext.Request.Method, context.HttpContext.Request.Path);
         }
 
         // Factory của ASP.NET tự thêm "type" và "traceId" (để tra log khi có sự cố).
