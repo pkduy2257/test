@@ -231,3 +231,8 @@ public interface IRefreshTokenRepository
 2. Tạo nhánh `refactor/java-style`.
 3. Commit theo bước: spec → Domain → Application → Infrastructure → Api → README.
 4. Cập nhật phần mô tả cấu trúc và đường dẫn file trong `README.md` cho khớp thư mục mới.
+
+## 10. Ghi chú sau triển khai
+
+- `ApiException` được xử lý bằng MVC filter `Api/Exceptions/ApiExceptionFilter.cs` thay vì trong `GlobalExceptionHandler`. Lý do: middleware exception handler xóa toàn bộ header của response, làm mất lệnh xóa cookie ở `/refresh` (bài so sánh phát hiện ở C12/C13). `GlobalExceptionHandler` chỉ còn xử lý lỗi 500.
+- Response lỗi thực tế (cả trước và sau refactor) có `Content-Type: application/json`, không phải `application/problem+json`, vì `[Produces("application/json")]` trên controller. Filter giữ đúng `application/json`.
