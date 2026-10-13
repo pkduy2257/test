@@ -52,6 +52,14 @@ public sealed class RefreshTokenRepository : IRefreshTokenRepository
         _db.RefreshTokens.Add(token);
     }
 
+    public async Task TouchActivityAsync(Guid familyId, DateTimeOffset now, DateTimeOffset touchedBefore, CancellationToken ct)
+    {
+        // AUTH-07: chỉ ghi khi lần ghi trước đã cũ hơn touchedBefore, để không UPDATE ở mọi request.
+        await _db.RefreshTokens
+            .Where(t => t.FamilyId == familyId && t.RevokedAt == null && t.LastActivityAt < touchedBefore)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.LastActivityAt, now), ct);
+    }
+
     public Task SaveChangesAsync(CancellationToken ct)
     {
         return _db.SaveChangesAsync(ct);

@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using LegacyVault.Application.Security;
 using LegacyVault.Domain.Entities;
+using LegacyVault.Domain.Enums;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
@@ -28,15 +29,33 @@ public sealed class JwtTokenService : ITokenService
         _timeProvider = timeProvider;
     }
 
-    public TimeSpan RefreshTokenLifetime
+    /// <summary>AUTH-07: phiên tối đa 12 giờ kể từ lúc đăng nhập.</summary>
+    public TimeSpan SessionLifetime
     {
-        get { return TimeSpan.FromDays(_settings.RefreshTokenDays); }
+        get { return TimeSpan.FromHours(_settings.SessionMaxHours); }
     }
 
-    public AccessToken CreateAccessToken(User user)
+    /// <summary>AUTH-07: không thao tác 30 phút thì hết phiên; Admin 15 phút.</summary>
+    public TimeSpan GetIdleTimeout(UserRole role)
+    {
+        if (role == UserRole.Admin)
+        {
+            return TimeSpan.FromMinutes(_settings.AdminIdleTimeoutMinutes);
+        }
+
+        return TimeSpan.FromMinutes(_settings.IdleTimeoutMinutes);
+    }
+
+    public AccessToken CreateAccessToken(User user, Guid sessionId, DateTimeOffset sessionExpiresAt)
     {
         var now = _timeProvider.GetUtcNow();
         var expiresAt = now.AddMinutes(_settings.AccessTokenMinutes);
+
+        // Access token không được sống quá hạn chót của phiên (AUTH-07).
+        if (expiresAt > sessionExpiresAt)
+        {
+            expiresAt = sessionExpiresAt;
+        }
 
         // Claim = một mẩu thông tin về người dùng nằm trong token.
         var claims = new List<Claim>
@@ -44,6 +63,7 @@ public sealed class JwtTokenService : ITokenService
             new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),   // "sub" = subject = userId
             new Claim(JwtRegisteredClaimNames.Email, user.Email),
             new Claim(JwtClaimTypes.Role, user.Role.ToString().ToUpperInvariant()),
+            new Claim(JwtClaimTypes.SessionId, sessionId.ToString()),     // phiên (FamilyId) để ghi lần thao tác cuối
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()), // id riêng của token
         };
 

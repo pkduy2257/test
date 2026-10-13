@@ -4,4 +4,5 @@ namespace LegacyVault.Infrastructure.Security;
 public static class JwtClaimTypes
 {
     public const string Role = "role";
+    public const string SessionId = "sid";
 }

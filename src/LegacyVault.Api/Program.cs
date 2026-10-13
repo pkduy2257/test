@@ -1,4 +1,5 @@
 using LegacyVault.Api.Config;
+using LegacyVault.Api.Helpers;
 using LegacyVault.Application;
 using LegacyVault.Infrastructure;
 using LegacyVault.Infrastructure.Data;
@@ -36,6 +37,7 @@ if (!app.Environment.IsDevelopment())
 
 app.UseCors(CorsConfig.FrontendCorsPolicy); // trước Authentication để preflight OPTIONS không bị 401
 app.UseAuthentication();     // đọc cookie/JWT → điền HttpContext.User
+app.UseMiddleware<SessionActivityMiddleware>(); // AUTH-07: ghi lần thao tác cuối của phiên
 app.UseAuthorization();      // kiểm tra [Authorize]
 
 app.MapControllers();

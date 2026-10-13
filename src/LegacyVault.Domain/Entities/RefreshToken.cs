@@ -6,7 +6,8 @@ namespace LegacyVault.Domain.Entities;
 /// <remarks>
 /// Ý tưởng:
 /// - Access token (JWT) sống ngắn (15 phút) và KHÔNG lưu DB → server không thu hồi được.
-/// - Refresh token sống dài (7 ngày) và CÓ lưu DB → đăng xuất = đánh dấu RevokedAt.
+/// - Refresh token sống tối đa 12 giờ kể từ lúc đăng nhập, hết sớm hơn nếu 30 phút không thao tác
+///   (Admin 15 phút) theo AUTH-07, và CÓ lưu DB → đăng xuất = đánh dấu RevokedAt.
 /// - Xoay vòng: mỗi lần dùng refresh token để lấy token mới, token cũ bị thu hồi
 ///   và trỏ tới token mới (ReplacedByTokenId). Tất cả token cùng một lần đăng nhập
 ///   chung một FamilyId.
@@ -32,6 +33,7 @@ public class RefreshToken : BaseEntity
 
     public DateTimeOffset CreatedAt { get; set; }
 
+    /// <summary>Hạn chót của cả phiên = lúc đăng nhập + 12 giờ; xoay vòng không cộng thêm (AUTH-07).</summary>
     public DateTimeOffset ExpiresAt { get; set; }
 
     /// <summary>Thời điểm bị thu hồi; null = còn hiệu lực (nếu chưa hết hạn).</summary>
@@ -39,4 +41,7 @@ public class RefreshToken : BaseEntity
 
     /// <summary>Id của token mới thay thế token này khi xoay vòng.</summary>
     public Guid? ReplacedByTokenId { get; set; }
+
+    /// <summary>Lần cuối người dùng gọi API trong phiên này; dùng để tính thời gian chờ (AUTH-07).</summary>
+    public DateTimeOffset LastActivityAt { get; set; }
 }

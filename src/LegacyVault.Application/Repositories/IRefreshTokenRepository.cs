@@ -22,6 +22,9 @@ public interface IRefreshTokenRepository
     /// <summary>Đánh dấu "sẽ INSERT"; chỉ thật sự ghi DB khi gọi SaveChangesAsync.</summary>
     void Add(RefreshToken token);
 
+    /// <summary>Ghi LastActivityAt = now cho token còn hiệu lực của phiên, nếu lần ghi trước cũ hơn touchedBefore (AUTH-07).</summary>
+    Task TouchActivityAsync(Guid familyId, DateTimeOffset now, DateTimeOffset touchedBefore, CancellationToken ct);
+
     /// <summary>Lưu mọi thay đổi đang chờ xuống DB (xem ghi chú trong RefreshTokenRepository).</summary>
     Task SaveChangesAsync(CancellationToken ct);
 }

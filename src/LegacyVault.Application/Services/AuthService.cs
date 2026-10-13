@@ -109,7 +109,8 @@ public sealed class AuthService : IAuthService
 
         // 4. Mở phiên mới: một family refresh token mới cho thiết bị này.
         var refresh = _tokenService.CreateRefreshToken();
-        var newToken = AddRefreshToken(user, refresh.Hash, Guid.CreateVersion7(), request.RememberMe, now);
+        var newToken = AddRefreshToken(user, refresh.Hash, Guid.CreateVersion7(), request.RememberMe,
+            now.Add(_tokenService.SessionLifetime), now);
         var result = BuildAuthResult(user, refresh.Value, newToken, now);
 
         // 5. Lưu MỘT lần cho mọi thay đổi (user + refresh token) → cùng một transaction.
@@ -145,7 +146,9 @@ public sealed class AuthService : IAuthService
         }
 
         var user = stored.User;
-        if (IsExpired(stored, now) || user.Status != UserStatus.Active || IsLockedOut(user, now))
+        var idleDeadline = stored.LastActivityAt.Add(_tokenService.GetIdleTimeout(user.Role));
+        if (IsExpired(stored, now) || idleDeadline <= now
+            || user.Status != UserStatus.Active || IsLockedOut(user, now))
         {
             RevokeToken(stored, now, null);
             await _refreshTokenRepository.SaveChangesAsync(ct);
@@ -154,7 +157,8 @@ public sealed class AuthService : IAuthService
 
         // Xoay vòng: cấp token mới cùng family, thu hồi token cũ và ghi lại token thay thế.
         var refresh = _tokenService.CreateRefreshToken();
-        var newToken = AddRefreshToken(user, refresh.Hash, stored.FamilyId, stored.IsPersistent, now);
+        var newToken = AddRefreshToken(user, refresh.Hash, stored.FamilyId, stored.IsPersistent,
+            stored.ExpiresAt, now);   // giữ hạn chót cũ, KHÔNG cộng thêm 12 giờ
         var result = BuildAuthResult(user, refresh.Value, newToken, now);
         RevokeToken(stored, now, newToken.Id);
 
@@ -299,7 +303,8 @@ public sealed class AuthService : IAuthService
 
     /// <summary>Tạo bản ghi refresh token mới (chưa ghi DB, chỉ đánh dấu "sẽ INSERT" khi SaveChanges).</summary>
     private RefreshToken AddRefreshToken(
-        User user, string tokenHash, Guid familyId, bool isPersistent, DateTimeOffset now)
+        User user, string tokenHash, Guid familyId, bool isPersistent,
+        DateTimeOffset sessionExpiresAt, DateTimeOffset now)
     {
         var token = new RefreshToken
         {
@@ -308,7 +313,8 @@ public sealed class AuthService : IAuthService
             FamilyId = familyId,
             IsPersistent = isPersistent,
             CreatedAt = now,
-            ExpiresAt = now.Add(_tokenService.RefreshTokenLifetime),
+            ExpiresAt = sessionExpiresAt,
+            LastActivityAt = now,
         };
         _refreshTokenRepository.Add(token);
         return token;
@@ -317,7 +323,7 @@ public sealed class AuthService : IAuthService
     /// <summary>Tạo access token và gom mọi thứ controller cần (token để ghi cookie + body trả FE).</summary>
     private AuthResult BuildAuthResult(User user, string refreshTokenValue, RefreshToken refreshToken, DateTimeOffset now)
     {
-        var access = _tokenService.CreateAccessToken(user);
+        var access = _tokenService.CreateAccessToken(user, refreshToken.FamilyId, refreshToken.ExpiresAt);
 
         var session = new AuthSessionResponse
         {

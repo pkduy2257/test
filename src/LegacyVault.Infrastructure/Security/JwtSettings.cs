@@ -18,5 +18,7 @@ public class JwtSettings
     public string SigningKey { get; set; } = string.Empty;
 
     public int AccessTokenMinutes { get; set; } = 15;
-    public int RefreshTokenDays { get; set; } = 7;
+    public int SessionMaxHours { get; set; } = 12;
+    public int IdleTimeoutMinutes { get; set; } = 30;
+    public int AdminIdleTimeoutMinutes { get; set; } = 15;
 }

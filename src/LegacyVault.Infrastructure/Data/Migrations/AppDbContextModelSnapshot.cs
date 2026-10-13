@@ -187,6 +187,9 @@ namespace LegacyVault.Infrastructure.Data.Migrations
                     b.Property<bool>("IsPersistent")
                         .HasColumnType("bit");
 
+                    b.Property<DateTimeOffset>("LastActivityAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<Guid?>("ReplacedByTokenId")
                         .HasColumnType("uniqueidentifier");
 
