@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LegacyVault – Giao diện mẫu</title>
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <h1>LegacyVault</h1>
+    <p class="muted">Giao diện mẫu để thử nhanh các chức năng backend đang có.</p>
+  </div>
+  <div class="session" id="session-box">Chưa đăng nhập</div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-tab="account" class="active">Tài khoản</button>
+  <button data-tab="vault">Kho</button>
+  <button data-tab="assets">Tài sản</button>
+  <button data-tab="beneficiaries">Người nhận</button>
+  <button data-tab="containers">Gói bàn giao</button>
+  <button data-tab="checkin">Điểm danh</button>
+  <button data-tab="ekyc">eKYC</button>
+  <button data-tab="settings">Cấu hình</button>
+</nav>
+
+<main>
+  <!-- Tài khoản -->
+  <section class="tab" id="tab-account">
+    <div class="grid">
+      <form class="card" id="form-register">
+        <h2>Đăng ký</h2>
+        <label>Họ tên <input name="fullName" required maxlength="200"></label>
+        <label>Email <input name="email" type="email" required></label>
+        <label>Mật khẩu (ít nhất 8 ký tự) <input name="password" type="password" minlength="8" required></label>
+        <label>Nhập lại mật khẩu <input name="confirmPassword" type="password" required></label>
+        <button type="submit">Đăng ký</button>
+        <p class="hint">Link xác minh được in ra log của backend khi chạy môi trường dev.</p>
+      </form>
+
+      <form class="card" id="form-verify">
+        <h2>Xác minh email</h2>
+        <label>Token trong link xác minh <input name="token" required></label>
+        <button type="submit">Xác minh</button>
+        <hr>
+        <label>Gửi lại link cho email <input name="email" type="email"></label>
+        <button type="button" class="ghost" id="btn-resend">Gửi lại link</button>
+      </form>
+
+      <form class="card" id="form-login">
+        <h2>Đăng nhập</h2>
+        <label>Email <input name="email" type="email" required></label>
+        <label>Mật khẩu <input name="password" type="password" required></label>
+        <label class="inline"><input name="rememberMe" type="checkbox"> Ghi nhớ đăng nhập</label>
+        <button type="submit">Đăng nhập</button>
+      </form>
+
+      <div class="card">
+        <h2>Phiên hiện tại</h2>
+        <div class="row">
+          <button type="button" id="btn-session">Xem phiên</button>
+          <button type="button" class="ghost" id="btn-refresh">Làm mới phiên</button>
+        </div>
+        <label class="inline"><input id="logout-all" type="checkbox"> Đăng xuất mọi thiết bị</label>
+        <button type="button" class="danger" id="btn-logout">Đăng xuất</button>
+        <pre class="output" id="out-session"></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- Kho -->
+  <section class="tab hidden" id="tab-vault">
+    <div class="grid">
+      <form class="card" id="form-vault-create">
+        <h2>Tạo hoặc mở kho của tôi</h2>
+        <p class="hint">Cần email đã xác minh. Đã có kho thì trả lại kho cũ.</p>
+        <label>Tên kho <input name="name" maxlength="200"></label>
+        <label>Mô tả <textarea name="description" maxlength="1000"></textarea></label>
+        <button type="submit">Tạo / mở kho</button>
+      </form>
+
+      <form class="card" id="form-vault-update">
+        <h2>Sửa kho</h2>
+        <label>Tên kho mới <input name="name" maxlength="200"></label>
+        <label>Mô tả mới <textarea name="description" maxlength="1000"></textarea></label>
+        <button type="submit">Lưu</button>
+        <button type="button" class="ghost" id="btn-vault-load">Tải lại kho</button>
+      </form>
+
+      <div class="card wide">
+        <h2>Thông tin kho</h2>
+        <div id="vault-view" class="muted">Chưa tải kho.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Tài sản -->
+  <section class="tab hidden" id="tab-assets">
+    <div class="grid">
+      <form class="card" id="form-asset-file">
+        <h2>Tải lên tệp</h2>
+        <label>Tệp <input name="file" type="file" required></label>
+        <label>Tên hiển thị <input name="name" maxlength="200"></label>
+        <label>Mô tả <input name="description" maxlength="1000"></label>
+        <button type="submit">Tải lên</button>
+      </form>
+
+      <form class="card" id="form-asset-text">
+        <h2>Tạo ghi chú văn bản</h2>
+        <label>Tên <input name="name" required maxlength="200"></label>
+        <label>Mô tả <input name="description" maxlength="1000"></label>
+        <label>Nội dung <textarea name="content" required></textarea></label>
+        <button type="submit">Lưu ghi chú</button>
+      </form>
+
+      <div class="card wide">
+        <div class="row between">
+          <h2>Danh sách tài sản</h2>
+          <button type="button" class="ghost" id="btn-assets-load">Tải lại</button>
+        </div>
+        <div id="assets-view" class="muted">Chưa tải.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Người nhận -->
+  <section class="tab hidden" id="tab-beneficiaries">
+    <div class="grid">
+      <form class="card" id="form-beneficiary">
+        <h2>Thêm người nhận</h2>
+        <label>Số CCCD (12 chữ số) <input name="citizenId" required maxlength="32"></label>
+        <label>Họ tên <input name="fullName" required maxlength="200"></label>
+        <label>Ngày sinh <input name="dateOfBirth" type="date" required></label>
+        <label>Email <input name="email" type="email"></label>
+        <label>Số điện thoại <input name="phone" maxlength="20"></label>
+        <label class="inline"><input name="confirmMinor" type="checkbox"> Xác nhận người nhận chưa đủ 18 tuổi</label>
+        <button type="submit">Thêm</button>
+      </form>
+
+      <div class="card wide">
+        <div class="row between">
+          <h2>Danh sách người nhận</h2>
+          <button type="button" class="ghost" id="btn-beneficiaries-load">Tải lại</button>
+        </div>
+        <div id="beneficiaries-view" class="muted">Chưa tải.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Gói bàn giao -->
+  <section class="tab hidden" id="tab-containers">
+    <div class="grid">
+      <form class="card" id="form-container">
+        <h2>Tạo gói</h2>
+        <label>Tên gói <input name="name" required maxlength="200"></label>
+        <label>Mô tả <input name="description" maxlength="1000"></label>
+        <button type="submit">Tạo gói</button>
+      </form>
+
+      <div class="card">
+        <h2>Gắn vào gói</h2>
+        <label>Gói <select id="sel-container"></select></label>
+        <label>Tài sản <select id="sel-asset"></select></label>
+        <button type="button" id="btn-add-asset">Thêm tài sản vào gói</button>
+        <label>Người nhận <select id="sel-beneficiary"></select></label>
+        <button type="button" id="btn-add-beneficiary">Thêm người nhận vào gói</button>
+        <label class="inline"><input id="confirm-plan" type="checkbox"> Đồng ý nếu thao tác làm kế hoạch quay về nháp</label>
+        <p class="hint">Gói Free chỉ tạo, đổi tên và lưu trữ được; cần gói trả phí mới thêm tài sản và người nhận.</p>
+      </div>
+
+      <div class="card wide">
+        <div class="row between">
+          <h2>Danh sách gói</h2>
+          <div class="row">
+            <label class="inline"><input id="include-archived" type="checkbox"> Gồm gói đã lưu trữ</label>
+            <button type="button" class="ghost" id="btn-containers-load">Tải lại</button>
+          </div>
+        </div>
+        <div id="containers-view" class="muted">Chưa tải.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Điểm danh -->
+  <section class="tab hidden" id="tab-checkin">
+    <div class="grid">
+      <div class="card">
+        <h2>Điểm danh</h2>
+        <p class="hint">Chỉ điểm danh được khi kế hoạch đã kích hoạt.</p>
+        <div class="row">
+          <button type="button" id="btn-checkin-load">Xem trạng thái</button>
+          <button type="button" class="ghost" id="btn-checkin">Điểm danh ngay</button>
+        </div>
+      </div>
+
+      <form class="card" id="form-checkin-settings">
+        <h2>Đổi lịch điểm danh</h2>
+        <label>Chu kỳ (ngày)
+          <select name="cycleDays"><option value="">Giữ nguyên</option><option>30</option><option>60</option><option>90</option></select>
+        </label>
+        <label>Thời gian chờ (ngày)
+          <select name="graceDays"><option value="">Giữ nguyên</option><option>7</option><option>14</option><option>30</option></select>
+        </label>
+        <button type="submit">Lưu (áp dụng từ kỳ sau)</button>
+      </form>
+
+      <div class="card wide">
+        <h2>Trạng thái</h2>
+        <div id="checkin-view" class="muted">Chưa tải.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- eKYC -->
+  <section class="tab hidden" id="tab-ekyc">
+    <div class="grid">
+      <div class="card">
+        <h2>Trạng thái eKYC</h2>
+        <button type="button" id="btn-ekyc-load">Xem trạng thái</button>
+        <p class="hint">Cần chạy dịch vụ eKYC (Python) ở http://127.0.0.1:8879, nếu không backend trả lỗi 503.</p>
+      </div>
+      <form class="card" id="form-ekyc-document">
+        <h2>Bước 1: Ảnh CCCD</h2>
+        <label>Ảnh mặt trước CCCD <input name="file" type="file" accept="image/*" required></label>
+        <button type="submit">Gửi ảnh CCCD</button>
+      </form>
+      <form class="card" id="form-ekyc-selfie">
+        <h2>Bước 2: Ảnh chân dung</h2>
+        <label>Ảnh selfie <input name="file" type="file" accept="image/*" required></label>
+        <button type="submit">So khớp khuôn mặt</button>
+      </form>
+      <div class="card wide">
+        <h2>Kết quả</h2>
+        <pre class="output" id="out-ekyc"></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- Cấu hình -->
+  <section class="tab hidden" id="tab-settings">
+    <form class="card" id="form-settings">
+      <h2>Địa chỉ backend</h2>
+      <label>API base URL <input name="baseUrl" required></label>
+      <div class="row">
+        <button type="submit">Lưu</button>
+        <button type="button" class="ghost" id="btn-health">Kiểm tra kết nối</button>
+      </div>
+      <p class="hint">Trang này phải mở ở http://localhost:5173 vì backend chỉ cho phép origin đó gửi cookie.</p>
+    </form>
+  </section>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <section class="card log">
+    <div class="row between">
+      <h2>Nhật ký gọi API</h2>
+      <button type="button" class="ghost" id="btn-clear-log">Xóa</button>
+    </div>
+    <div id="log"></div>
+  </section>
+</main>
+
+<script type="module" src="/src/app.js"></script>
+</body>
+</html>
