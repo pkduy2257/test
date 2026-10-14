@@ -89,6 +89,19 @@
         <button type="button" class="ghost" id="btn-vault-load">Tải lại kho</button>
       </form>
 
+      <div class="card demo">
+        <h2>Nâng cấp dịch vụ (chỉ dùng khi demo)</h2>
+        <p class="hint">Backend chưa có thanh toán. Nút này sửa thẳng database qua máy chủ giao diện mẫu để thử các chức năng cần kho trả phí.</p>
+        <label>Hạng dịch vụ
+          <select id="sel-tier">
+            <option value="Xs">XS · 200 MiB · 2 người nhận</option>
+            <option value="XsMax">XS Max · 500 MiB · 5 người nhận</option>
+            <option value="Free">Về lại Free · 20 MiB · 0 người nhận</option>
+          </select>
+        </label>
+        <button type="button" class="warning" id="btn-upgrade">Đổi hạng cho kho của tôi</button>
+      </div>
+
       <div class="card wide">
         <h2>Thông tin kho</h2>
         <div id="vault-view" class="muted">Chưa tải kho.</div>

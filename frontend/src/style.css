@@ -116,6 +116,8 @@ button {
 
 button.ghost { background: #fff; color: var(--primary); }
 button.danger { background: var(--error); border-color: var(--error); }
+button.warning { background: #b45309; border-color: #b45309; }
+.card.demo { border: 1px dashed #b45309; background: #fffbeb; }
 button.small { margin: 0; padding: 2px 8px; font-size: 12px; }
 button:disabled { opacity: 0.5; cursor: default; }
 

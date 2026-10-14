@@ -364,6 +364,33 @@ async function updateVault(event) {
   }
 }
 
+// Chỉ dùng khi demo: nhờ máy chủ giao diện mẫu sửa hạng dịch vụ trong database (backend chưa có thanh toán).
+async function upgradeTier() {
+  if (data.user === null) {
+    toast("Hãy đăng nhập trước.", true);
+    return;
+  }
+  if (!requireVault()) {
+    return;
+  }
+  const tier = byId("sel-tier").value;
+  const response = await fetch("/demo/upgrade-tier", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Demo": "1" },
+    body: JSON.stringify({ email: data.user.email, tier: tier }),
+  });
+  let body = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = { message: "Máy chủ giao diện mẫu không trả kết quả." };
+  }
+  toast(body.message, !response.ok);
+  if (response.ok) {
+    await loadVault(false);
+  }
+}
+
 // ---------- Tài sản ----------
 
 async function loadAssets() {
@@ -764,6 +791,7 @@ function bindEvents() {
   on("form-vault-create", "submit", createVault);
   on("form-vault-update", "submit", updateVault);
   on("btn-vault-load", "click", function () { loadVault(false); });
+  on("btn-upgrade", "click", upgradeTier);
 
   on("form-asset-file", "submit", uploadFile);
   on("form-asset-text", "submit", createTextAsset);
